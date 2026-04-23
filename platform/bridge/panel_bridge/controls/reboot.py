@@ -1,12 +1,18 @@
 """Pi reboot via sudo shutdown.
 
-Requires a passwordless sudoers entry for the bridge user. Add to
-/etc/sudoers.d/panel-bridge (via `sudo visudo -f /etc/sudoers.d/panel-bridge`):
+This module and the wifi/screen modules all require passwordless sudo
+for specific commands. Add to /etc/sudoers.d/panel-bridge via
+`sudo visudo -f /etc/sudoers.d/panel-bridge`:
 
     chaddugas ALL=(root) NOPASSWD: /sbin/shutdown -r now
+    chaddugas ALL=(root) NOPASSWD: /usr/bin/nmcli radio wifi *
+    chaddugas ALL=(root) NOPASSWD: /usr/bin/tee /sys/class/graphics/fb0/blank
 
-Without this the reboot button quietly fails. No state to report (the
-Pi is on its way out), so no emit_initial.
+(Replace `chaddugas` with your bridge user if different.)
+
+Without these, the buttons quietly log "sudo failed — is passwordless
+sudo configured?" and nothing happens. No state to report for reboot
+(the Pi is on its way out), so no emit_initial.
 """
 
 from __future__ import annotations

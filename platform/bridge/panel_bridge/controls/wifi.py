@@ -1,8 +1,9 @@
 """Wi-Fi radio control via nmcli.
 
-`nmcli radio wifi on|off` toggles the radio. `nmcli -t radio wifi` reads
-the current state (enabled/disabled). We keep this minimal for V1;
-ssid/password management is deferred.
+`nmcli radio wifi on|off` toggles the radio. Reads don't need privilege
+but WRITES require PolicyKit authorization — on headless Trixie there's
+no polkit agent, so we go through sudo instead. Needs a sudoers entry
+(see panel-bridge sudoers doc in reboot.py).
 """
 
 from __future__ import annotations
@@ -37,16 +38,19 @@ async def _read_wifi_enabled() -> bool | None:
 async def _set_wifi_enabled(on: bool) -> bool:
     try:
         proc = await asyncio.create_subprocess_exec(
-            NMCLI, "radio", "wifi", "on" if on else "off",
+            "sudo", "-n", NMCLI, "radio", "wifi", "on" if on else "off",
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
         _, err = await proc.communicate()
     except OSError as e:
-        log.warning("wifi: nmcli not executable: %s", e)
+        log.warning("wifi: sudo/nmcli not executable: %s", e)
         return False
     if proc.returncode != 0:
-        log.warning("wifi: nmcli set failed: %s", err.decode(errors="replace"))
+        log.warning(
+            "wifi: sudo nmcli failed (is passwordless sudo configured?): %s",
+            err.decode(errors="replace"),
+        )
         return False
     return True
 
