@@ -22,10 +22,27 @@ class StateCache:
         """Point-in-time copy of every cached message."""
         return list(self._cache.values())
 
+    def ha_availability(self) -> str | None:
+        """Latest value of the ha_availability signal, or None if we haven't
+        seen one yet."""
+        msg = self._cache.get("ha_availability")
+        if not msg:
+            return None
+        v = msg.get("value")
+        return v if isinstance(v, str) else None
+
     @staticmethod
     def _key(msg: dict) -> str | None:
         t = msg.get("type")
         if not t:
             return None
-        name = msg.get("name")
-        return f"{t}:{name}" if name else t
+        # Per-type subkeys so multiple rows of the same type coexist in
+        # the snapshot instead of overwriting each other.
+        if t == "sensor":
+            name = msg.get("name")
+            return f"sensor:{name}" if name else None
+        if t == "entity_state":
+            eid = msg.get("entity_id")
+            return f"entity_state:{eid}" if eid else None
+        # Singletons (roster, ha_availability, etc.) key by type alone.
+        return t

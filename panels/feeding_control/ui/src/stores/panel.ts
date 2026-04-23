@@ -13,8 +13,10 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import type {
+  EntityState,
   IncomingMessage,
   OutgoingCommand,
+  RosterEntry,
   SensorAmbientMessage,
   SensorProximityMessage,
 } from "@/types";
@@ -25,6 +27,8 @@ interface ProximityState extends SensorProximityMessage {
 interface AmbientState extends SensorAmbientMessage {
   receivedAt: number;
 }
+
+type HaAvailability = "online" | "offline" | null;
 
 const RECONNECT_DELAY_MS = 1000;
 
@@ -37,6 +41,9 @@ export const usePanelStore = defineStore("panel", () => {
   const lastError = ref<string | null>(null);
   const proximity = ref<ProximityState | null>(null);
   const ambient = ref<AmbientState | null>(null);
+  const haAvailability = ref<HaAvailability>(null);
+  const roster = ref<RosterEntry[]>([]);
+  const entities = ref<Record<string, EntityState>>({});
 
   // ---- non-reactive WS plumbing ----
   let ws: WebSocket | null = null;
@@ -61,14 +68,21 @@ export const usePanelStore = defineStore("panel", () => {
     };
 
     ws.onmessage = (ev) => {
-      let msg: IncomingMessage;
+      let raw: unknown;
       try {
-        msg = JSON.parse(ev.data) as IncomingMessage;
+        raw = JSON.parse(ev.data);
       } catch {
         console.warn("non-JSON from bridge:", ev.data);
         return;
       }
-      handleMessage(msg);
+      if (
+        typeof raw !== "object" ||
+        raw === null ||
+        typeof (raw as { type?: unknown }).type !== "string"
+      ) {
+        return;
+      }
+      handleMessage(raw as IncomingMessage);
     };
 
     ws.onerror = () => {
@@ -111,8 +125,21 @@ export const usePanelStore = defineStore("panel", () => {
       } else if (msg.name === "ambient") {
         ambient.value = { ...msg, receivedAt: now };
       }
+    } else if (msg.type === "ha_availability") {
+      haAvailability.value = msg.value;
+    } else if (msg.type === "roster") {
+      roster.value = msg.entities;
+    } else if (msg.type === "entity_state") {
+      entities.value = {
+        ...entities.value,
+        [msg.entity_id]: { state: msg.state, attributes: msg.attributes },
+      };
     }
     // Unknown types are silently ignored at this layer — log if useful.
+  }
+
+  function entity(entityId: string): EntityState | undefined {
+    return entities.value[entityId];
   }
 
   function send(cmd: OutgoingCommand | Record<string, unknown>): boolean {
@@ -121,7 +148,28 @@ export const usePanelStore = defineStore("panel", () => {
     return true;
   }
 
-  // ---- product-specific action helpers ----
+  // ---- actions ----
+
+  /**
+   * Dispatch any HA service call against an entity declared in the
+   * integration manifest. Integration-side rejects unknown entity_ids.
+   * Bridge-side drops if ha_availability isn't "online"; callers should
+   * check `haAvailability` first to disable UI instead of firing blind.
+   */
+  function callService(
+    entityId: string,
+    action: string,
+    data: Record<string, unknown> = {},
+  ): boolean {
+    return send({
+      type: "call_service",
+      entity_id: entityId,
+      action,
+      data,
+    });
+  }
+
+  // ---- legacy POC helpers (to be removed in step 14) ----
 
   function feed(quantity: number): boolean {
     return send({ type: "feed", quantity });
@@ -141,12 +189,18 @@ export const usePanelStore = defineStore("panel", () => {
     lastError,
     proximity,
     ambient,
+    haAvailability,
+    roster,
+    entities,
     // lifecycle
     connect,
     disconnect,
     // I/O
     send,
     // actions
+    callService,
+    entity,
+    // legacy
     feed,
     skip,
     toggleFeeder,

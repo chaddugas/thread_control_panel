@@ -350,7 +350,7 @@ esp_mqtt_client_config_t mqtt_cfg = {
     - Verified end-to-end: live sensor cards + button-press → C6 `panel_app: UART RX` log
     - Real layout, controls, and `platform/ui-core` extraction are step 13's scope.
 
-11. **Custom HA integration: generic entity forwarder (`custom_components/thread_panel/`) + C6 availability gating** (in progress — HA side done 2026-04-23, C6 + bridge + UI remaining)
+11. **Custom HA integration: generic entity forwarder (`custom_components/thread_panel/`) + C6 availability gating** (in progress — HA + C6 sides done 2026-04-23, bridge + UI remaining)
 
     HA side (`custom_components/thread_panel/` — at the repo root so HACS accepts it):
     - Config flow accepts the manifest YAML pasted directly. Reference templates live at `panels/<id>/ha/manifest.yaml` in the repo; users copy, adjust entity_ids, paste. (Originally planned as path-based in Day 1 with paste as Day-2 migration — promoted to Day 1 because HACS doesn't deploy `panels/<id>/ha/` onto the HA box, so there's no filesystem path to point at. Day-2 now: an interactive entity picker.)

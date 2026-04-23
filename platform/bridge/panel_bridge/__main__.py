@@ -28,6 +28,16 @@ async def main() -> None:
         await ws.broadcast(msg)
 
     async def on_client_message(msg: dict) -> None:
+        # Server-side safety net: don't fire call_service commands at a
+        # deaf integration. UI is expected to gate on ha_availability too,
+        # but enforce at the bridge in case of bugs or race windows.
+        if msg.get("type") == "call_service":
+            ha_av = cache.ha_availability()
+            if ha_av != "online":
+                log.warning(
+                    "call_service dropped — ha_availability=%s: %s", ha_av, msg
+                )
+                return
         ok = await uart.send(msg)
         if not ok:
             log.warning("client message dropped — UART link is down: %s", msg)
