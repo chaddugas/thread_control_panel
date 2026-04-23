@@ -170,12 +170,15 @@ entities:
   - entity_id: switch.pet_feeder
     attributes: []               # state only, no attributes forwarded
   - entity_id: sensor.pet_feeder_schedule
-    attributes: [schedule, next_feed_time]
+    attributes: all              # forward every attribute
   - entity_id: sensor.pet_feeder_last_fed
     attributes: [timestamp, quantity]
 ```
 
-`attributes: []` or missing = state only. No implicit "forward everything" — attribute allowlist is required, explicit, and bounded by the manifest author.
+Attribute forms:
+- omitted or `[]` — state only, no attributes
+- `[a, b, c]` — explicit allowlist
+- `all` — forward every attribute. Intended for entities whose attribute keys are dynamic (e.g. a schedule whose keys vary per item) and can't be enumerated ahead of time. Trades payload bound + noise for flexibility; use only when an allowlist isn't practical.
 
 **Publish semantics** (two dials, tuned independently):
 

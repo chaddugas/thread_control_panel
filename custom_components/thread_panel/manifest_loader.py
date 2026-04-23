@@ -10,7 +10,9 @@ import yaml
 @dataclass(frozen=True)
 class EntityDecl:
     entity_id: str
-    attributes: tuple[str, ...]
+    # None = forward every attribute (the manifest said `attributes: all`).
+    # Tuple = forward only those named keys.
+    attributes: tuple[str, ...] | None
 
 
 @dataclass(frozen=True)
@@ -55,14 +57,20 @@ def parse_manifest(text: str) -> PanelManifest:
         seen.add(entity_id)
 
         attrs_raw = item.get("attributes")
+        attrs: tuple[str, ...] | None
         if attrs_raw is None:
-            attrs_raw = []
-        if not isinstance(attrs_raw, list) or not all(
+            attrs = ()
+        elif attrs_raw == "all":
+            attrs = None
+        elif isinstance(attrs_raw, list) and all(
             isinstance(a, str) for a in attrs_raw
         ):
+            attrs = tuple(attrs_raw)
+        else:
             raise ManifestError(
-                f"entities[{idx}].attributes must be a list of strings (or omitted)"
+                f"entities[{idx}].attributes must be a list of strings, "
+                f"the string 'all', or omitted"
             )
-        entities.append(EntityDecl(entity_id=entity_id, attributes=tuple(attrs_raw)))
+        entities.append(EntityDecl(entity_id=entity_id, attributes=attrs))
 
     return PanelManifest(panel_id=panel_id, entities=tuple(entities))

@@ -134,9 +134,14 @@ class PanelForwarder:
         if state is None:
             payload: dict[str, Any] = {"state": "unknown", "attributes": {}}
         else:
-            attrs = {
-                k: state.attributes[k] for k in decl.attributes if k in state.attributes
-            }
+            if decl.attributes is None:
+                attrs = dict(state.attributes)
+            else:
+                attrs = {
+                    k: state.attributes[k]
+                    for k in decl.attributes
+                    if k in state.attributes
+                }
             payload = {"state": state.state, "attributes": attrs}
         await mqtt.async_publish(
             self.hass,
@@ -174,6 +179,9 @@ class PanelForwarder:
             return True
         if old.state != new.state:
             return True
+        if decl.attributes is None:
+            # Forward-all — any attribute change triggers a publish.
+            return old.attributes != new.attributes
         return any(
             old.attributes.get(a) != new.attributes.get(a) for a in decl.attributes
         )

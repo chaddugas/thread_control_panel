@@ -2,9 +2,13 @@
 #
 # Consumed by the thread_panel custom HA integration. Each entry here declares
 # one HA entity to forward to the panel:
+#
 #   entity_id:  the full HA entity_id (domain.object_id) to mirror.
-#   attributes: list of attribute keys to forward alongside state.
-#               omit or leave empty to forward state only.
+#   attributes: controls which of the entity's attributes are forwarded.
+#       omit or []   forward state only, no attributes
+#       [a, b, c]    forward only these named attribute keys
+#       all          forward every attribute (use for entities whose attribute
+#                    keys are dynamic, e.g. a schedule whose keys vary per item)
 #
 # Entity IDs below are placeholders — replace with the real PetLibro entity IDs
 # in your Home Assistant install.
@@ -16,9 +20,7 @@ entities:
     attributes: []
 
   - entity_id: sensor.pet_feeder_schedule
-    attributes:
-      - schedule
-      - next_feed_time
+    attributes: all
 
   - entity_id: sensor.pet_feeder_last_fed
     attributes:
