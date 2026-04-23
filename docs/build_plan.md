@@ -395,10 +395,20 @@ esp_mqtt_client_config_t mqtt_cfg = {
     - `__init__.py` forwards the SENSOR platform on config entry setup, unloads on teardown.
     - Firmware: `panel_net` now takes an availability topic via `panel_net_set_availability_topic()`. When set, the MQTT client is configured with an LWT that publishes `"offline"` retained on ungraceful disconnect, and `"online"` retained on each successful connect. `panel_app_init()` wires `PANEL_TOPIC_AVAILABILITY` through.
 
-    Deferred to step 14 (when the Pi has control-owner logic to act on the writes):
-    - Write entities: brightness (NumberEntity), screen_on (SwitchEntity), wifi_enabled / wifi_ssid / wifi_password.
-    - Cmd entities: reboot_pi, reboot_c6 (ButtonEntity).
-    - These all need corresponding Pi-side bridge logic (nmcli, backlight, shutdown) — no point creating the HA entity until there's a handler on the other end.
+    Panel-itself controls landed 2026-04-23:
+    - Firmware: C6 subscribes to `set/#` wildcard + `cmd/reboot_c6` + `cmd/reboot_pi`. Set/* gets wrapped as `panel_set` and forwarded over UART; cmd/reboot_c6 triggers `esp_restart()` locally; cmd/reboot_pi forwards as `panel_cmd`. Outbound UART `panel_state` messages get published to `state/<name>` retained.
+    - Bridge: `panel_bridge/controls/` — one module per control (`screen.py`, `wifi.py`, `reboot.py`) + a dispatch registry. Each handler executes the system action (`vcgencmd`, `nmcli`, `sudo shutdown`) and emits `panel_state` back. Initial state is published at bridge startup so HA sees fresh values.
+    - Integration: `switch.py` (screen_on, wifi_enabled) and `button.py` (reboot_pi, reboot_c6). Shared `entity.py` module hosts the device-info + availability subscription that all three platforms share.
+
+    Sudoers note — reboot_pi requires a passwordless sudo entry. On the Pi, run `sudo visudo -f /etc/sudoers.d/panel-bridge` and add:
+
+    ```
+    chaddugas ALL=(root) NOPASSWD: /sbin/shutdown -r now
+    ```
+
+    Deferred:
+    - **Brightness (NumberEntity)**: the Waveshare 6.25" HDMI display doesn't expose a `/sys/class/backlight/*` interface. Revisit when either (a) the hardware is swapped for something with a controllable backlight, or (b) we ship the kiosk compositor and can do a Wayland gamma-overlay software dim.
+    - **wifi_ssid / wifi_password / wifi_ssids (TextEntity + select)**: full credential management. Wire up when there's a real UX need; for now, nmcli on the Pi directly is sufficient.
 
 13. **OTA firmware flashing over UART (Pi → C6)**
     - Motivation: the XIAO ESP32-C6 can't use USB and the 5V rail simultaneously. In the enclosure we can't easily pull the power-select pin, so USB flashing becomes impractical. The Pi is already wired to the C6 over UART, already has the repo cloned, and already has the toolchain-adjacent context — it's the right flasher.

@@ -26,3 +26,23 @@
 // here over UART and get published to this topic for the integration to
 // dispatch as HA service calls.
 #define PANEL_TOPIC_CMD_CALL_SERVICE       "thread_panel/" PANEL_ID "/cmd/call_service"
+
+// Panel-itself control channel. `set/#` carries HA-driven changes to
+// panel-owned state (brightness, screen_on, wifi_*); forwarded to the Pi
+// over UART for the bridge to act on. `state/<name>` carries the Pi's
+// current value back; the C6 publishes those retained so HA sees current
+// state after the Pi acts or on any reconnect.
+#define PANEL_TOPIC_SET_PREFIX             "thread_panel/" PANEL_ID "/set/"
+#define PANEL_TOPIC_SET_WILDCARD           "thread_panel/" PANEL_ID "/set/#"
+#define PANEL_TOPIC_STATE_PREFIX           "thread_panel/" PANEL_ID "/state/"
+
+// C6 self-reboot. The C6 subscribes directly and calls esp_restart() —
+// no Pi involvement. Separate from reboot_pi, which goes UART → Pi →
+// shutdown command.
+#define PANEL_TOPIC_CMD_REBOOT_C6          "thread_panel/" PANEL_ID "/cmd/reboot_c6"
+
+// Pi-side commands. Forwarded to the Pi over UART as panel_cmd envelopes
+// for the bridge to dispatch. Subscribed explicitly (rather than via a
+// cmd/# wildcard) to avoid receiving our own cmd/call_service publishes
+// back as echoes.
+#define PANEL_TOPIC_CMD_REBOOT_PI          "thread_panel/" PANEL_ID "/cmd/reboot_pi"

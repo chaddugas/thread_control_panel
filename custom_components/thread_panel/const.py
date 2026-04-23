@@ -17,6 +17,12 @@ TOPIC_PANEL_AVAILABILITY = "thread_panel/{panel_id}/availability"
 TOPIC_PANEL_PROXIMITY = "thread_panel/{panel_id}/state/proximity"
 TOPIC_PANEL_AMBIENT_BRIGHTNESS = "thread_panel/{panel_id}/state/ambient_brightness"
 
+# Panel-itself controls — bidirectional state + command channels for the
+# Pi-owned controls (display power, wifi radio, reboot).
+TOPIC_PANEL_SET = "thread_panel/{panel_id}/set/{name}"
+TOPIC_PANEL_STATE = "thread_panel/{panel_id}/state/{name}"
+TOPIC_PANEL_CMD = "thread_panel/{panel_id}/cmd/{name}"
+
 PAYLOAD_ONLINE = "online"
 PAYLOAD_OFFLINE = "offline"
 

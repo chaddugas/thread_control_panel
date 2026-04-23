@@ -11,6 +11,7 @@
 
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mqtt_client.h"
@@ -25,6 +26,12 @@ static const char *TAG = "panel_app";
 // Sensor publish/forward cadence.
 #define SENSOR_TICK_MS         1000
 #define AMBIENT_PERIOD_TICKS   5     // publish ambient every 5 ticks (5 s)
+
+// Ambient normalization ceiling: mV reading that maps to 100%. Tune this
+// to the brightest "normal indoor" value the sensor produces — anything
+// above saturates at 100% (fine for "dim the display when it's bright").
+// Start at 500 mV; nudge if your room readings don't spread meaningfully.
+#define AMBIENT_MV_CEILING     500
 
 // Readiness of the HA integration, mirrored from ha_availability retained
 // topic. Start offline so we don't publish into the void before we've heard
@@ -54,13 +61,13 @@ static void publish_proximity(int dist_cm, int strength)
 
 static void publish_ambient(int raw, int mv)
 {
-    // Normalize mV → 0..100 against the ADC's effective full-scale (~3100 mV
-    // at DB_12 attenuation). Sensor isn't perfectly linear in lux, but this
-    // gives a usable "brightness percent" for backlight curves.
+    // Normalize mV → 0..100 against AMBIENT_MV_CEILING. Sensor isn't
+    // perfectly linear in lux, but this gives a usable "brightness
+    // percent" for backlight curves.
     int pct = -1;
     if (mv >= 0)
     {
-        pct = mv * 100 / 3100;
+        pct = mv * 100 / AMBIENT_MV_CEILING;
         if (pct < 0) pct = 0;
         if (pct > 100) pct = 100;
     }
@@ -136,10 +143,9 @@ static void on_uart_line(const char *line, size_t len)
         return;
     }
 
-    // Route by message type. For V1 the Pi only sends call_service
-    // commands; add new branches here when other outbound types appear.
-    // Substring match is sufficient because the bridge emits these as
-    // flat objects; nothing else would legitimately contain that pattern.
+    // Route by message type. Substring match is sufficient because the
+    // bridge emits these as flat objects; nothing else would legitimately
+    // contain that pattern.
     if (strstr(line, "\"type\":\"call_service\"") != NULL)
     {
         int msg_id = panel_net_publish(PANEL_TOPIC_CMD_CALL_SERVICE,
@@ -147,6 +153,44 @@ static void on_uart_line(const char *line, size_t len)
         if (msg_id < 0)
         {
             ESP_LOGW(TAG, "call_service publish failed — MQTT not connected");
+        }
+        return;
+    }
+
+    // panel_state: bridge reports current value of a panel-itself control.
+    // Extract the name from the envelope to build the state/<name> topic,
+    // then publish the whole line retained. Receivers (HA entity classes)
+    // ignore the type/name fields and read value directly.
+    if (strstr(line, "\"type\":\"panel_state\"") != NULL)
+    {
+        const char *name_start = strstr(line, "\"name\":\"");
+        if (name_start == NULL)
+        {
+            ESP_LOGW(TAG, "panel_state missing name field, dropping");
+            return;
+        }
+        name_start += strlen("\"name\":\"");
+        const char *name_end = strchr(name_start, '"');
+        if (name_end == NULL)
+        {
+            ESP_LOGW(TAG, "panel_state name field unterminated, dropping");
+            return;
+        }
+        int name_len = (int)(name_end - name_start);
+
+        char topic[128];
+        int tn = snprintf(topic, sizeof(topic), "%s%.*s",
+                          PANEL_TOPIC_STATE_PREFIX, name_len, name_start);
+        if (tn <= 0 || tn >= (int)sizeof(topic))
+        {
+            ESP_LOGW(TAG, "panel_state topic overflow, dropping");
+            return;
+        }
+
+        int msg_id = panel_net_publish(topic, line, (int)len, 1, 1);
+        if (msg_id < 0)
+        {
+            ESP_LOGW(TAG, "panel_state publish failed — MQTT not connected");
         }
         return;
     }
@@ -238,6 +282,22 @@ void panel_app_on_connected(esp_mqtt_client_handle_t client)
     msg_id = esp_mqtt_client_subscribe(client, PANEL_TOPIC_STATE_ROSTER, 0);
     ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d",
              PANEL_TOPIC_STATE_ROSTER, msg_id);
+
+    // Panel-itself set/* wildcard — HA-driven changes to panel-owned
+    // state. Wrap each and forward to the Pi over UART.
+    msg_id = esp_mqtt_client_subscribe(client, PANEL_TOPIC_SET_WILDCARD, 0);
+    ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d",
+             PANEL_TOPIC_SET_WILDCARD, msg_id);
+
+    // C6 self-reboot command.
+    msg_id = esp_mqtt_client_subscribe(client, PANEL_TOPIC_CMD_REBOOT_C6, 0);
+    ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d",
+             PANEL_TOPIC_CMD_REBOOT_C6, msg_id);
+
+    // Pi-side reboot command — forwarded over UART for the bridge to act on.
+    msg_id = esp_mqtt_client_subscribe(client, PANEL_TOPIC_CMD_REBOOT_PI, 0);
+    ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d",
+             PANEL_TOPIC_CMD_REBOOT_PI, msg_id);
 }
 
 // Buffer size for the wrapped UART line we forward to the Pi. Must be big
@@ -293,6 +353,32 @@ static void forward_roster(const char *data, int data_len)
     (void)panel_uart_send_line(buf, n);
 }
 
+// Panel-itself set/<name>: wrap with a panel_set envelope that names the
+// control, then forward over UART for the bridge to act on. Payload from
+// HA is a raw JSON object like {"value": 50}; we splice that in alongside
+// the control name so the Pi gets a single self-describing line.
+static void forward_panel_set(const char *name, int name_len,
+                              const char *data, int data_len)
+{
+    if (data_len < 2 || data[0] != '{' || data[data_len - 1] != '}')
+    {
+        ESP_LOGW(TAG, "panel_set payload malformed, dropping");
+        return;
+    }
+
+    char buf[FORWARD_BUF_SIZE];
+    int n = snprintf(buf, sizeof(buf),
+                     "{\"type\":\"panel_set\",\"name\":\"%.*s\",%.*s}",
+                     name_len, name,
+                     data_len - 2, data + 1);
+    if (n <= 0 || n >= (int)sizeof(buf))
+    {
+        ESP_LOGW(TAG, "panel_set envelope overflow (%d bytes), dropping", n);
+        return;
+    }
+    (void)panel_uart_send_line(buf, n);
+}
+
 void panel_app_on_data(esp_mqtt_client_handle_t client,
                        const char *topic, int topic_len,
                        const char *data, int data_len)
@@ -329,6 +415,43 @@ void panel_app_on_data(esp_mqtt_client_handle_t client,
     {
         ESP_LOGI(TAG, "roster: %.*s", data_len, data);
         forward_roster(data, data_len);
+        return;
+    }
+
+    // set/<name>: HA-driven change to a panel-itself control. Forward to
+    // Pi for the bridge to act on.
+    const size_t set_prefix_len = strlen(PANEL_TOPIC_SET_PREFIX);
+    if ((size_t)topic_len > set_prefix_len &&
+        memcmp(topic, PANEL_TOPIC_SET_PREFIX, set_prefix_len) == 0)
+    {
+        const char *name = topic + set_prefix_len;
+        int name_len = topic_len - (int)set_prefix_len;
+        ESP_LOGI(TAG, "panel_set %.*s: %.*s",
+                 name_len, name, data_len, data);
+        forward_panel_set(name, name_len, data, data_len);
+        return;
+    }
+
+    // cmd/reboot_c6: self-reboot. No Pi involvement.
+    const size_t reboot_c6_topic_len = strlen(PANEL_TOPIC_CMD_REBOOT_C6);
+    if ((size_t)topic_len == reboot_c6_topic_len &&
+        memcmp(topic, PANEL_TOPIC_CMD_REBOOT_C6, reboot_c6_topic_len) == 0)
+    {
+        ESP_LOGW(TAG, "cmd/reboot_c6 received — restarting");
+        esp_restart();
+        return;  // unreachable but keeps the shape consistent
+    }
+
+    // cmd/reboot_pi: forward to Pi as a panel_cmd.
+    const size_t reboot_pi_topic_len = strlen(PANEL_TOPIC_CMD_REBOOT_PI);
+    if ((size_t)topic_len == reboot_pi_topic_len &&
+        memcmp(topic, PANEL_TOPIC_CMD_REBOOT_PI, reboot_pi_topic_len) == 0)
+    {
+        ESP_LOGI(TAG, "panel_cmd reboot_pi");
+        char buf[64];
+        int n = snprintf(buf, sizeof(buf),
+                         "{\"type\":\"panel_cmd\",\"name\":\"reboot_pi\"}");
+        (void)panel_uart_send_line(buf, n);
         return;
     }
 

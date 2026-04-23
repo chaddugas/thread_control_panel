@@ -1,11 +1,8 @@
 """Panel-itself sensor entities (proximity, ambient brightness).
 
-Each panel exposes the two sensors the C6 publishes periodically to MQTT.
-The entities subscribe to those retained topics and surface the `value`
-field as the native value, with auxiliary fields exposed as extra state
-attributes. Entity availability is gated on the C6's own `availability`
-topic (LWT-backed), so an ungraceful disconnect shows the entities as
-"unavailable" in HA within the broker keepalive window.
+Both subscribe to retained topics the C6 publishes periodically. The
+`value` field becomes the native value; auxiliary fields ride along as
+extra state attributes. Availability comes from the shared entity base.
 """
 
 from __future__ import annotations
@@ -23,50 +20,25 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfLength
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     CONF_PANEL_ID,
-    DOMAIN,
     TOPIC_PANEL_AMBIENT_BRIGHTNESS,
-    TOPIC_PANEL_AVAILABILITY,
     TOPIC_PANEL_PROXIMITY,
 )
+from .entity import PanelEntityBase
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def _device_info(panel_id: str) -> DeviceInfo:
-    return DeviceInfo(
-        identifiers={(DOMAIN, panel_id)},
-        name=f"Thread Panel: {panel_id}",
-        manufacturer="thread_panel",
-        model="Thread Control Panel",
-    )
-
-
-class _PanelSensorBase(SensorEntity):
-    """Shared availability + state-subscription plumbing."""
-
-    _attr_should_poll = False
-    _attr_has_entity_name = True
+class _PanelSensorBase(PanelEntityBase, SensorEntity):
+    """Adds state-topic subscription on top of the shared base."""
 
     _state_topic_template: str  # subclasses set this
 
-    def __init__(self, panel_id: str) -> None:
-        self._panel_id = panel_id
-        self._attr_available = False
-        self._attr_device_info = _device_info(panel_id)
-        self._unsubs: list[Any] = []
-
     async def async_added_to_hass(self) -> None:
-        availability_topic = TOPIC_PANEL_AVAILABILITY.format(panel_id=self._panel_id)
-        self._unsubs.append(
-            await mqtt.async_subscribe(
-                self.hass, availability_topic, self._on_availability_message
-            )
-        )
+        await super().async_added_to_hass()
         self._unsubs.append(
             await mqtt.async_subscribe(
                 self.hass,
@@ -74,17 +46,6 @@ class _PanelSensorBase(SensorEntity):
                 self._on_state_message,
             )
         )
-
-    async def async_will_remove_from_hass(self) -> None:
-        for unsub in self._unsubs:
-            unsub()
-        self._unsubs.clear()
-
-    @callback
-    def _on_availability_message(self, msg) -> None:
-        payload = msg.payload if isinstance(msg.payload, str) else ""
-        self._attr_available = payload.strip() == "online"
-        self.async_write_ha_state()
 
     @callback
     def _on_state_message(self, msg) -> None:

@@ -12,11 +12,14 @@ static const char *TAG = "panel_sensors";
 //   GND  -> shared GND with the C6 (and the Pi via the existing UART link)
 //   SIG  -> D0 = GPIO0 = ADC1_CH0
 //
-// DB_12 attenuation gives ~0..3.1V usable range — sensor's full output (0..VCC,
-// where VCC is ~3.3V) maps cleanly onto the ADC's effective range.
+// DB_2_5 attenuation gives ~0..1.25V usable range. The TEMT6000 with its
+// default 10kΩ load only reaches meaningful voltages in the low hundreds of
+// mV under normal indoor conditions, so tightening the ADC range gives us
+// more counts per mV where it matters. Bright conditions (direct flashlight,
+// sunlight) will saturate at ~1250 mV — fine for our "dim when bright" UX.
 #define AMBIENT_ADC_UNIT     ADC_UNIT_1
 #define AMBIENT_ADC_CHANNEL  ADC_CHANNEL_0
-#define AMBIENT_ADC_ATTEN    ADC_ATTEN_DB_12
+#define AMBIENT_ADC_ATTEN    ADC_ATTEN_DB_2_5
 
 static adc_oneshot_unit_handle_t s_adc_handle = NULL;
 static adc_cali_handle_t s_cali_handle = NULL;
@@ -66,7 +69,7 @@ esp_err_t panel_sensors_init(void)
     }
 
     s_initialized = true;
-    ESP_LOGI(TAG, "Ambient sensor up on ADC1 CH0 (D0/GPIO0), atten=DB_12");
+    ESP_LOGI(TAG, "Ambient sensor up on ADC1 CH0 (D0/GPIO0), atten=DB_2_5");
     return ESP_OK;
 }
 
