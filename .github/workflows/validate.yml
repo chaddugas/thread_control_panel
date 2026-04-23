@@ -15,3 +15,8 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
+          # Skip checks that only matter for authors submitting to the HACS
+          # default store. This repo is a personal custom integration,
+          # installed by pointing HACS at chaddugas/thread_control_panel
+          # directly — none of these affect install-time compatibility.
+          ignore: brands description topics issues
