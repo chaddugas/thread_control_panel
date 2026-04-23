@@ -60,10 +60,11 @@ async def apply_wifi_enabled(bridge, payload: dict[str, Any]) -> None:
     if not isinstance(value, bool):
         log.warning("wifi_enabled: expected bool, got %r", value)
         return
-    ok = await _set_wifi_enabled(value)
-    if not ok:
-        return
-    await bridge.send_panel_state("wifi_enabled", {"value": value})
+    # Attempt the change. Whether it succeeds or not, we read the actual
+    # state back below — so a failed action naturally reverts HA's
+    # optimistic update on the next round trip.
+    await _set_wifi_enabled(value)
+    await emit_initial(bridge)
 
 
 async def emit_initial(bridge) -> None:

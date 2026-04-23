@@ -29,17 +29,11 @@ BLANK_PATH = "/sys/class/graphics/fb0/blank"
 TEE = "/usr/bin/tee"
 
 
-async def _read_blank() -> str | None:
-    """Return the current blank state as a string ("0".."4"), or None if
-    the file hasn't been written to yet (some kernels return empty until
-    first write)."""
-    try:
-        with open(BLANK_PATH, "r") as f:
-            value = f.read().strip()
-    except OSError as e:
-        log.warning("screen: cannot read %s: %s", BLANK_PATH, e)
-        return None
-    return value or None
+# fb0/blank is effectively write-only on this kernel — reads return empty,
+# so we can't verify state by re-reading the file. Instead we cache the
+# last *successfully applied* value in-process; on a failed write we
+# report the cached value so HA's optimistic update reverts.
+_last_confirmed: bool = True  # boot default: unblanked
 
 
 async def _write_blank(value: int) -> bool:
@@ -65,26 +59,20 @@ async def _write_blank(value: int) -> bool:
 
 
 async def apply_screen_on(bridge, payload: dict[str, Any]) -> None:
+    global _last_confirmed
     value = payload.get("value")
     if not isinstance(value, bool):
         log.warning("screen_on: expected bool, got %r", value)
         return
     # 0 = unblanked, 4 = powerdown (full off).
     ok = await _write_blank(0 if value else 4)
-    if not ok:
-        return
-    await bridge.send_panel_state("screen_on", {"value": value})
+    if ok:
+        _last_confirmed = value
+    # Always report the last-confirmed value — a failed write means we
+    # report the *old* state, which causes HA to revert its optimistic
+    # update. That's the user-visible signal that the action didn't take.
+    await bridge.send_panel_state("screen_on", {"value": _last_confirmed})
 
 
 async def emit_initial(bridge) -> None:
-    raw = await _read_blank()
-    if raw is None:
-        # No state written yet — assume unblanked (boot default).
-        await bridge.send_panel_state("screen_on", {"value": True})
-        return
-    try:
-        value = int(raw) == 0
-    except ValueError:
-        log.warning("screen: unparseable blank value %r", raw)
-        return
-    await bridge.send_panel_state("screen_on", {"value": value})
+    await bridge.send_panel_state("screen_on", {"value": _last_confirmed})
