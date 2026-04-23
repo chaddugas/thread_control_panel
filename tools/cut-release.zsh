@@ -24,9 +24,22 @@ cut-release() {
     return 1
   fi
 
+  # If the working tree is dirty, offer to commit everything as one commit
+  # before proceeding. An empty commit message aborts.
   if ! git diff --quiet || ! git diff --cached --quiet; then
-    print -u2 "cut-release: working tree is dirty — commit or stash first"
-    return 1
+    print "Uncommitted changes:"
+    git --no-pager status --short
+    print ""
+    print -n "Commit message (empty to abort): "
+    local commit_msg
+    read commit_msg
+    if [[ -z "$commit_msg" ]]; then
+      print -u2 "cut-release: aborted — nothing committed"
+      return 1
+    fi
+    git add -A
+    git commit -m "$commit_msg"
+    print ""
   fi
 
   local branch
@@ -37,6 +50,18 @@ cut-release() {
     local go
     read go
     [[ "$go" == "y" || "$go" == "Y" ]] || return 1
+  fi
+
+  # If the branch has commits ahead of its upstream, note them — they'll be
+  # pushed along with the release tag on the final `git push`.
+  if git rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
+    local unpushed
+    unpushed=$(git rev-list --count '@{u}..HEAD' 2>/dev/null)
+    if [[ -n "$unpushed" && "$unpushed" -gt 0 ]]; then
+      print "Unpushed commits on $branch ($unpushed) — will push with the release tag:"
+      git --no-pager log '@{u}..HEAD' --oneline
+      print ""
+    fi
   fi
 
   local latest major minor patch first=0

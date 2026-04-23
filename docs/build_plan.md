@@ -350,7 +350,7 @@ esp_mqtt_client_config_t mqtt_cfg = {
     - Verified end-to-end: live sensor cards + button-press → C6 `panel_app: UART RX` log
     - Real layout, controls, and `platform/ui-core` extraction are step 13's scope.
 
-11. **Custom HA integration: generic entity forwarder (`custom_components/thread_panel/`) + C6 availability gating** (next up)
+11. **Custom HA integration: generic entity forwarder (`custom_components/thread_panel/`) + C6 availability gating** (in progress — HA side done 2026-04-23, C6 + bridge + UI remaining)
 
     HA side (`custom_components/thread_panel/` — at the repo root so HACS accepts it):
     - Config flow accepts the manifest YAML pasted directly. Reference templates live at `panels/<id>/ha/manifest.yaml` in the repo; users copy, adjust entity_ids, paste. (Originally planned as path-based in Day 1 with paste as Day-2 migration — promoted to Day 1 because HACS doesn't deploy `panels/<id>/ha/` onto the HA box, so there's no filesystem path to point at. Day-2 now: an interactive entity picker.)
@@ -365,8 +365,13 @@ esp_mqtt_client_config_t mqtt_cfg = {
     - Shutdown: publish `ha_availability → offline`; LWT set for unclean exits.
     - `panels/<id>/ha/` is a hatch for non-entity-shaped product data; expected to be empty for `feeding_control` V1.
 
+    Follow-ups (HA side — not blocking Phase B/C):
+    - **Options flow for in-place reconfig.** Currently the only way to edit the manifest is delete + re-add the config entry. An `OptionsFlowHandler` with a pre-filled YAML paste field would let users add/remove entities in place. Enforce `panel_id` stability (reject edits that change it, since it's the unique_id anchor). The existing Store-based stale-topic cleanup already handles entity removal on reload.
+    - Roster `area` field — needs entity_registry + device_registry joins. Nice-to-have.
+
     C6 side (`panel_platform`):
     - Subscribe to `ha_availability`; forward value over UART as `{"type":"ha_availability","value":"..."}`.
+    - Subscribe to `state/entity/#` and `state/_roster`. On every inbound message, wrap the payload with a typed envelope (`{"type":"entity_state","entity_id":"...",<state/attrs>}` or `{"type":"roster",<entities list>}`) and forward over UART. Retained semantics mean subscribe alone redelivers the full current snapshot to the Pi.
     - Add in-RAM last-values cache for sensor publishes (ambient, proximity).
     - Gate periodic state publishes on `ha_availability == online`. On `offline → online` transition, republish current sensor values once before resuming normal cadence.
 
@@ -384,18 +389,24 @@ esp_mqtt_client_config_t mqtt_cfg = {
       - *Inside the custom integration (preferred on current reasoning):* entity classes (`SwitchEntity`, `SensorEntity`, `NumberEntity`, etc.) that subscribe to the panel's MQTT topics and present them as HA entities. One device, one integration, no firmware-side discovery publishing.
       - *MQTT Discovery from firmware (originally planned):* static table in `panel_platform/panel_discovery.c` published at boot, picked up by HA's built-in MQTT integration. Simpler firmware but creates a second HA device unless `identifiers` are matched to merge with the integration's device.
 
-13. **`feeding_control` product UI (`panels/feeding_control/ui/`) + `platform/ui-core/` extraction**
+13. **OTA firmware flashing over UART (Pi → C6)**
+    - Motivation: the XIAO ESP32-C6 can't use USB and the 5V rail simultaneously. In the enclosure we can't easily pull the power-select pin, so USB flashing becomes impractical. The Pi is already wired to the C6 over UART, already has the repo cloned, and already has the toolchain-adjacent context — it's the right flasher.
+    - Likely approach: ESP ROM serial protocol over the existing Pi↔C6 UART link, driven by `esptool.py` running on the Pi. Requires asserting BOOT/EN at the C6's flashing sequence — either via Pi GPIO pulling DTR/RTS-equivalent lines, or by pre-programming a bootloader that can enter download mode without pin strap.
+    - Open questions: (1) can we cohabit flashing UART with the existing runtime UART on the same pins, or do we need a second UART? (2) does `idf.py flash` work through a remote serial device, or do we need a separate "sync the built artifacts to the Pi, run esptool there" deploy script? (3) how do we safely recover from a bad flash if the firmware bricks — manual USB fallback, or a factory-reset gesture?
+    - Priority: do this before UI build (step 14) so firmware iteration stays fast once the enclosure is assembled.
+
+14. **`feeding_control` product UI (`panels/feeding_control/ui/`) + `platform/ui-core/` extraction**
     - Real UI for the pet feeder: schedule view, feed/skip/toggle controls, panel-itself surfaces (brightness, screen, wifi status), offline overlay driven by `ha_availability`.
     - Built against live data from steps 11/12.
     - Extract platform-shaped code from `stores/panel.ts` into `platform/ui-core/` as part of this work: WS connection + reconnect, snapshot replay, availability handling, entity-state consumption (`state/entity/*`), `call_service` dispatch. The line is now clear — that's all platform. Everything else (layout, components, product-specific logic) stays in the product.
     - Panel-itself control owners in the bridge (brightness, screen, wifi; deferred from step 9) get wired here, since we finally know which controls the UI surfaces.
 
-14. **Kiosk deployment**
+15. **Kiosk deployment**
     - `cage` + Chromium installed on the Pi
     - systemd units launch bridge + kiosk on boot
     - `tools/deploy.sh` for git-pull-based deploys
 
-15. **Enclosure**
+16. **Enclosure**
     - Shapr3D design
     - P1S print
     - Cable management

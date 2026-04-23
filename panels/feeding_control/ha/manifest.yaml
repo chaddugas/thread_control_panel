@@ -16,13 +16,14 @@
 panel_id: feeding_control
 
 entities:
-  - entity_id: switch.pet_feeder
+  - entity_id: light.chad_s_office_desk_lamp
     attributes: []
 
-  - entity_id: sensor.pet_feeder_schedule
+  - entity_id: light.chad_s_office_ambiance_lights
     attributes: all
 
-  - entity_id: sensor.pet_feeder_last_fed
+  - entity_id: light.chad_s_office_overhead_light_3
     attributes:
-      - timestamp
-      - quantity
+      - max_color_temp_kelvin
+
+  - entity_id: light.chad_s_office_overhead_light_2
