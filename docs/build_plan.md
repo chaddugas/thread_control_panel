@@ -385,11 +385,20 @@ esp_mqtt_client_config_t mqtt_cfg = {
     - Expose `ha_availability` through the `panel` store so product UIs can render loading/offline overlays.
     - Product UIs choose their own UX for the offline state; platform just provides the signal.
 
-12. **Panel-itself entity representation in HA** (next up)
-    - Panel shows up as a device in HA with entities for reboot, wifi, brightness, screen, sensors, availability.
-    - Two implementation options — decide after step 11 exposes which is less friction:
-      - *Inside the custom integration (preferred on current reasoning):* entity classes (`SwitchEntity`, `SensorEntity`, `NumberEntity`, etc.) that subscribe to the panel's MQTT topics and present them as HA entities. One device, one integration, no firmware-side discovery publishing.
-      - *MQTT Discovery from firmware (originally planned):* static table in `panel_platform/panel_discovery.c` published at boot, picked up by HA's built-in MQTT integration. Simpler firmware but creates a second HA device unless `identifiers` are matched to merge with the integration's device.
+12. **Panel-itself entity representation in HA** (in progress — approach chosen, MVP scope done 2026-04-23)
+
+    Chosen approach: **Python entity classes inside `custom_components/thread_panel/`**. One device per panel (identified by `panel_id`), entities subscribe to the panel's own MQTT topics, availability gated on the C6's LWT-backed `availability` topic.
+
+    Landed in the MVP:
+    - `sensor.py` with `PanelProximitySensor` + `PanelAmbientBrightnessSensor`. They subscribe to `state/proximity` and `state/ambient_brightness` retained topics, expose `value` as the native reading and auxiliary fields (`strength`, `raw`, `mv`) as extra state attributes.
+    - Device registration via `DeviceInfo(identifiers={(DOMAIN, panel_id)})`.
+    - `__init__.py` forwards the SENSOR platform on config entry setup, unloads on teardown.
+    - Firmware: `panel_net` now takes an availability topic via `panel_net_set_availability_topic()`. When set, the MQTT client is configured with an LWT that publishes `"offline"` retained on ungraceful disconnect, and `"online"` retained on each successful connect. `panel_app_init()` wires `PANEL_TOPIC_AVAILABILITY` through.
+
+    Deferred to step 14 (when the Pi has control-owner logic to act on the writes):
+    - Write entities: brightness (NumberEntity), screen_on (SwitchEntity), wifi_enabled / wifi_ssid / wifi_password.
+    - Cmd entities: reboot_pi, reboot_c6 (ButtonEntity).
+    - These all need corresponding Pi-side bridge logic (nmcli, backlight, shutdown) — no point creating the HA entity until there's a handler on the other end.
 
 13. **OTA firmware flashing over UART (Pi → C6)**
     - Motivation: the XIAO ESP32-C6 can't use USB and the 5V rail simultaneously. In the enclosure we can't easily pull the power-select pin, so USB flashing becomes impractical. The Pi is already wired to the C6 over UART, already has the repo cloned, and already has the toolchain-adjacent context — it's the right flasher.

@@ -205,6 +205,11 @@ static void on_ha_availability(const char *data, int data_len)
 
 void panel_app_init(void)
 {
+    // Tell the platform which topic to use for availability — must happen
+    // before panel_net_start() so the MQTT client is configured with the
+    // corresponding LWT.
+    panel_net_set_availability_topic(PANEL_TOPIC_AVAILABILITY);
+
     ESP_ERROR_CHECK(panel_uart_init(on_uart_line));
     ESP_ERROR_CHECK(panel_sensors_init());
     ESP_ERROR_CHECK(panel_lidar_init());

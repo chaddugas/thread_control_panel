@@ -32,6 +32,7 @@ extern const uint8_t ca_cert_pem_end[] asm("_binary_ca_cert_pem_end");
 static bool s_mqtt_started = false;
 static esp_mqtt_client_handle_t s_client = NULL;
 static volatile bool s_connected = false;
+static const char *s_availability_topic = NULL;
 
 static void log_error_if_nonzero(const char *message, int error_code)
 {
@@ -72,6 +73,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED — broker reached");
         s_connected = true;
+        // Announce presence. LWT handles the offline flip on an unclean
+        // disconnect; this publish covers the clean-connect case.
+        if (s_availability_topic)
+        {
+            esp_mqtt_client_publish(client, s_availability_topic,
+                                    "online", 6, 1, 1);
+        }
         panel_app_on_connected(client);
         break;
 
@@ -131,6 +139,18 @@ static void start_mqtt_client(void)
             .username = CONFIG_MQTT_USERNAME,
             .client_id = CONFIG_MQTT_CLIENT_ID,
             .authentication = {.password = CONFIG_MQTT_PASSWORD},
+        },
+        .session = {
+            // When s_availability_topic is NULL, .topic is NULL, which
+            // esp-mqtt treats as "no LWT." Otherwise the broker will
+            // publish "offline" retained on our ungraceful disconnect.
+            .last_will = {
+                .topic = s_availability_topic,
+                .msg = "offline",
+                .msg_len = 7,
+                .qos = 1,
+                .retain = 1,
+            },
         },
     };
 
@@ -233,4 +253,9 @@ int panel_net_publish(const char *topic, const char *data, int len,
         return -1;
     }
     return esp_mqtt_client_publish(s_client, topic, data, len, qos, retain);
+}
+
+void panel_net_set_availability_topic(const char *topic)
+{
+    s_availability_topic = topic;
 }

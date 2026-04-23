@@ -4,6 +4,11 @@
 // Used to namespace MQTT topics and Home Assistant discovery objects.
 #define PANEL_ID "feeding_control"
 
+// The C6's own availability. Published "online" on MQTT connect, and
+// set as the LWT so the broker publishes "offline" automatically on
+// ungraceful disconnect. HA entity availability is derived from this.
+#define PANEL_TOPIC_AVAILABILITY  "thread_panel/" PANEL_ID "/availability"
+
 // Readiness signal published by the thread_panel HA integration. Retained,
 // LWT-backed. We gate our state publishes on this being "online" so we
 // don't fill the Thread mesh with messages no one is listening to.

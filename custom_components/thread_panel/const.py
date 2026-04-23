@@ -11,6 +11,12 @@ TOPIC_ENTITY_STATE = "thread_panel/{panel_id}/state/entity/{entity_id}"
 TOPIC_ENTITY_STATE_WILDCARD = "thread_panel/{panel_id}/state/entity/#"
 TOPIC_CALL_SERVICE = "thread_panel/{panel_id}/cmd/call_service"
 
+# Panel-itself topics — the C6's own availability (LWT-backed) and the
+# per-panel sensor readings it publishes periodically.
+TOPIC_PANEL_AVAILABILITY = "thread_panel/{panel_id}/availability"
+TOPIC_PANEL_PROXIMITY = "thread_panel/{panel_id}/state/proximity"
+TOPIC_PANEL_AMBIENT_BRIGHTNESS = "thread_panel/{panel_id}/state/ambient_brightness"
+
 PAYLOAD_ONLINE = "online"
 PAYLOAD_OFFLINE = "offline"
 
