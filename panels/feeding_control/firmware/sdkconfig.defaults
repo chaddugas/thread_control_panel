@@ -1,4 +1,15 @@
 #
+# Serial Flasher Config
+#
+# The XIAO ESP32-C6 has 4 MB of flash; ESP-IDF's default for esp32c6 is
+# 2 MB, so we have to set this explicitly. The OTA partition layout needs
+# two ~1.875 MB app slots plus overhead, which requires the full 4 MB.
+# CONFIG_ESPTOOLPY_FLASHSIZE_2MB is not set
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+# end of Serial Flasher Config
+
+#
 # Partition Table
 #
 CONFIG_PARTITION_TABLE_CUSTOM=y
@@ -7,6 +18,18 @@ CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_OFFSET=0x8000
 CONFIG_PARTITION_TABLE_MD5=y
 # end of Partition Table
+
+#
+# OTA rollback
+#
+# With rollback enabled, a freshly-OTA'd app must call
+# esp_ota_mark_app_valid_cancel_rollback() to commit itself. If it
+# crashes or stalls before doing so, the bootloader reverts to the
+# previous partition on the next reset. We mark valid in panel_net.c
+# after MQTT reaches the broker — that's a decent proxy for "all the
+# layered infrastructure still works."
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# end of OTA rollback
 
 #
 # mbedTLS

@@ -6,4 +6,7 @@ idf_component_register(
     PRIV_REQUIRES
         panel_platform
         mqtt
+        esp_https_ota
+        app_update
+        esp_http_client
 )

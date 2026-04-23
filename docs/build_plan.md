@@ -410,11 +410,17 @@ esp_mqtt_client_config_t mqtt_cfg = {
     - **Brightness (NumberEntity)**: the Waveshare 6.25" HDMI display doesn't expose a `/sys/class/backlight/*` interface. Revisit when either (a) the hardware is swapped for something with a controllable backlight, or (b) we ship the kiosk compositor and can do a Wayland gamma-overlay software dim.
     - **wifi_ssid / wifi_password / wifi_ssids (TextEntity + select)**: full credential management. Wire up when there's a real UX need; for now, nmcli on the Pi directly is sufficient.
 
-13. **OTA firmware flashing over UART (Pi → C6)**
-    - Motivation: the XIAO ESP32-C6 can't use USB and the 5V rail simultaneously. In the enclosure we can't easily pull the power-select pin, so USB flashing becomes impractical. The Pi is already wired to the C6 over UART, already has the repo cloned, and already has the toolchain-adjacent context — it's the right flasher.
-    - Likely approach: ESP ROM serial protocol over the existing Pi↔C6 UART link, driven by `esptool.py` running on the Pi. Requires asserting BOOT/EN at the C6's flashing sequence — either via Pi GPIO pulling DTR/RTS-equivalent lines, or by pre-programming a bootloader that can enter download mode without pin strap.
-    - Open questions: (1) can we cohabit flashing UART with the existing runtime UART on the same pins, or do we need a second UART? (2) does `idf.py flash` work through a remote serial device, or do we need a separate "sync the built artifacts to the Pi, run esptool there" deploy script? (3) how do we safely recover from a bad flash if the firmware bricks — manual USB fallback, or a factory-reset gesture?
-    - Priority: do this before UI build (step 14) so firmware iteration stays fast once the enclosure is assembled.
+13. **OTA firmware updates over Thread** (in progress)
+    - Motivation: the XIAO ESP32-C6 can't use USB and the 5V rail simultaneously. In the enclosure we can't easily pull the power-select pin, so USB flashing becomes impractical. Need a way to push new firmware without touching the board.
+    - Approach decided 2026-04-23: **HTTP OTA over Thread, Mac-direct, no Pi involvement.** Mac builds, runs a transient HTTP server, publishes `cmd/ota` to the C6 with a firmware URL; C6 downloads via `esp_http_client`, writes to the idle OTA partition via ESP-IDF's `esp_ota_*` APIs, reboots. ESP-IDF's built-in app rollback: new firmware has a self-validation window after reboot; if it doesn't mark itself valid (crashes, fails to reach MQTT, etc.) the bootloader reverts on next reset. NAT64 on OTBR is enabled so the C6 can reach the Mac's IPv4 via its Thread IPv6 address. Pi is not in the OTA path; Pi WiFi can stay off.
+    - Rejected alternative: UART flashing. XIAO C6 buttons (BOOT/RESET) aren't on pin headers, so automating the reset-into-download-mode sequence from the Pi would need fiddly SMD soldering to the button pads. HTTP OTA avoids all that.
+    - Recovery if the firmware is bricked beyond rollback's reach: open the enclosure, disconnect 5V, plug USB, flash via `idf.py` as today. Inconvenient but not impossible.
+
+    **E1 — Partition table + OTA-aware build config** (in progress): `partitions.csv` now has `nvs, otadata, phy_init, ota_0, ota_1`. NVS offset/size preserved so Thread credentials survive the migration. One USB flash (erasing just the otadata region, not NVS) moves the running firmware from `factory` to `ota_0`; after that, OTAs are self-sustaining.
+
+    **E2 — OTA handler in firmware**: subscribe to `cmd/ota`, parse URL from payload, download via `esp_http_client` into the idle OTA partition, `esp_ota_set_boot_partition()`, reboot. After reboot on the new partition, the firmware's startup code runs self-checks (MQTT reconnect succeeds) and calls `esp_ota_mark_app_valid_cancel_rollback()` to commit. If the self-check fails or the app crashes before committing, bootloader reverts.
+
+    **E3 — Mac-side `panel-ota` CLI tool**: lives in `tools/`. Builds firmware, starts `python3 -m http.server` in the build dir, detects Mac's LAN IP via kernel-route trick, publishes `cmd/ota` to `thread_panel/feeding_control/cmd/ota` with the URL, tails the MQTT `availability` topic to watch for the C6's reboot (offline flap then online), shuts down the HTTP server.
 
 14. **`feeding_control` product UI (`panels/feeding_control/ui/`) + `platform/ui-core/` extraction**
     - Real UI for the pet feeder: schedule view, feed/skip/toggle controls, panel-itself surfaces (brightness, screen, wifi status), offline overlay driven by `ha_availability`.

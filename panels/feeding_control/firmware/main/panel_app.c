@@ -10,6 +10,8 @@
 #include <string.h>
 
 #include "esp_err.h"
+#include "esp_http_client.h"
+#include "esp_https_ota.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
@@ -228,6 +230,85 @@ static void republish_current_sensor_values(void)
     }
 }
 
+// OTA download runs in its own task so it doesn't block the MQTT event
+// loop. The URL is heap-allocated by the caller and freed here.
+static void ota_task(void *arg)
+{
+    char *url = (char *)arg;
+    ESP_LOGI(TAG, "OTA: starting download from %s", url);
+
+    esp_http_client_config_t http_cfg = {
+        .url = url,
+        .timeout_ms = 10000,
+        .keep_alive_enable = true,
+    };
+    esp_https_ota_config_t ota_cfg = {
+        .http_config = &http_cfg,
+    };
+
+    esp_err_t err = esp_https_ota(&ota_cfg);
+    if (err == ESP_OK)
+    {
+        ESP_LOGW(TAG, "OTA: download succeeded, rebooting into new image");
+        // Let MQTT flush any pending publishes before the hard reset.
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        esp_restart();
+    }
+    else
+    {
+        ESP_LOGE(TAG, "OTA: download failed: %s — staying on current image",
+                 esp_err_to_name(err));
+    }
+
+    free(url);
+    vTaskDelete(NULL);
+}
+
+// cmd/ota payload is `{"url":"http://..."}`. Pull the URL out via the
+// same strstr-based unwrap we use elsewhere (UI/bridge emits flat
+// objects, so this is reliable enough for V1).
+static void handle_ota_command(const char *data, int data_len)
+{
+    const char prefix[] = "\"url\":\"";
+    const char *p = data;
+    const char *end = data + data_len;
+    const char *url_start = NULL;
+    for (; p + sizeof(prefix) - 1 <= end; p++)
+    {
+        if (memcmp(p, prefix, sizeof(prefix) - 1) == 0)
+        {
+            url_start = p + sizeof(prefix) - 1;
+            break;
+        }
+    }
+    if (url_start == NULL)
+    {
+        ESP_LOGW(TAG, "cmd/ota: no url field, dropping");
+        return;
+    }
+    const char *url_end = memchr(url_start, '"', end - url_start);
+    if (url_end == NULL)
+    {
+        ESP_LOGW(TAG, "cmd/ota: url field unterminated, dropping");
+        return;
+    }
+    size_t url_len = url_end - url_start;
+    char *url = malloc(url_len + 1);
+    if (url == NULL)
+    {
+        ESP_LOGE(TAG, "cmd/ota: out of memory for url");
+        return;
+    }
+    memcpy(url, url_start, url_len);
+    url[url_len] = '\0';
+
+    if (xTaskCreate(ota_task, "ota", 8192, url, 5, NULL) != pdPASS)
+    {
+        ESP_LOGE(TAG, "cmd/ota: failed to spawn ota task");
+        free(url);
+    }
+}
+
 static void on_ha_availability(const char *data, int data_len)
 {
     bool was_online = s_ha_online;
@@ -298,6 +379,11 @@ void panel_app_on_connected(esp_mqtt_client_handle_t client)
     msg_id = esp_mqtt_client_subscribe(client, PANEL_TOPIC_CMD_REBOOT_PI, 0);
     ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d",
              PANEL_TOPIC_CMD_REBOOT_PI, msg_id);
+
+    // OTA firmware download command.
+    msg_id = esp_mqtt_client_subscribe(client, PANEL_TOPIC_CMD_OTA, 0);
+    ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d",
+             PANEL_TOPIC_CMD_OTA, msg_id);
 }
 
 // Buffer size for the wrapped UART line we forward to the Pi. Must be big
@@ -452,6 +538,16 @@ void panel_app_on_data(esp_mqtt_client_handle_t client,
         int n = snprintf(buf, sizeof(buf),
                          "{\"type\":\"panel_cmd\",\"name\":\"reboot_pi\"}");
         (void)panel_uart_send_line(buf, n);
+        return;
+    }
+
+    // cmd/ota: start a firmware update from the URL in the payload.
+    const size_t ota_topic_len = strlen(PANEL_TOPIC_CMD_OTA);
+    if ((size_t)topic_len == ota_topic_len &&
+        memcmp(topic, PANEL_TOPIC_CMD_OTA, ota_topic_len) == 0)
+    {
+        ESP_LOGW(TAG, "cmd/ota received: %.*s", data_len, data);
+        handle_ota_command(data, data_len);
         return;
     }
 

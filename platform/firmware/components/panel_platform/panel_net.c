@@ -7,6 +7,8 @@
 
 #include "esp_log.h"
 #include "esp_event.h"
+#include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "mqtt_client.h"
 #include "esp_tls.h"
 #include "sdkconfig.h"
@@ -73,6 +75,22 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED — broker reached");
         s_connected = true;
+        // If this is the first boot after an OTA (partition state ==
+        // PENDING_VERIFY), the fact that we got this far — Thread attach,
+        // DNS, TLS, MQTT auth — is enough to commit the new image.
+        // Silently no-op for USB-flashed or already-committed apps.
+        {
+            const esp_partition_t *running = esp_ota_get_running_partition();
+            esp_ota_img_states_t state;
+            if (running != NULL &&
+                esp_ota_get_state_partition(running, &state) == ESP_OK &&
+                state == ESP_OTA_IMG_PENDING_VERIFY)
+            {
+                ESP_LOGI(TAG, "OTA: marking running partition valid — first "
+                             "successful MQTT connect after update");
+                esp_ota_mark_app_valid_cancel_rollback();
+            }
+        }
         // Announce presence. LWT handles the offline flip on an unclean
         // disconnect; this publish covers the clean-connect case.
         if (s_availability_topic)

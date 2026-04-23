@@ -1,5 +1,15 @@
-# Name,   Type, SubType, Offset,  Size, Flags
-# Note: if you have increased the bootloader size, make sure to update the offsets to avoid overlap
-nvs,        data, nvs,      0x9000,  0x6000,
-phy_init,   data, phy,      0xf000,  0x1000,
-factory,    app,  factory,  0x10000, 0x140000,
+# Name,    Type, SubType, Offset,   Size,     Flags
+# NVS holds the Thread dataset + any NVS-stored runtime state. Kept at the
+# same offset/size as the pre-OTA layout so we preserve Thread credentials
+# across the partition-table migration — flash with `idf.py erase-region`
+# only clearing the otadata/phy_init region, not the whole chip.
+nvs,       data, nvs,     0x9000,   0x6000,
+# OTA data partition: bootloader reads this to decide which of ota_0/ota_1
+# to boot. Two 4 KB sectors (redundant, CRC-checked).
+otadata,   data, ota,     0xf000,   0x2000,
+phy_init,  data, phy,     0x11000,  0x1000,
+# Two OTA app slots. Either can be the running partition; the other is the
+# update target. Sized at ~1.875 MB each; current firmware is comfortably
+# under 1.2 MB so there's headroom for the OTA client code (E2).
+ota_0,     app,  ota_0,   0x20000,  0x1E0000,
+ota_1,     app,  ota_1,   0x200000, 0x1E0000,
