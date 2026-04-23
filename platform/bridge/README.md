@@ -4,20 +4,20 @@ Long-running daemon on the Pi: bridges the C6 (UART) ↔ panel UI (WebSocket).
 
 ## What it does
 
-- Reads JSON lines from `/dev/serial0`, parses, caches the latest per `(type, name)`, broadcasts to every connected WebSocket client.
-- Receives JSON messages over WebSocket, writes them to UART for the C6 to publish to MQTT.
+- Reads JSON lines from `/dev/serial0`, parses, caches the latest per typed key (sensors by `type:name`, entities by `entity_state:entity_id`, everything else by `type`), broadcasts to every connected WebSocket client.
+- Receives JSON messages over WebSocket, writes them to UART for the C6 to publish to MQTT. Gates `call_service` commands on the last-known `ha_availability` — drops with a warning when HA is offline so commands don't fire into the void.
 - On a fresh WebSocket connection, replays the cached state so the UI gets current values immediately.
 - Auto-reconnects the UART if the link drops.
 
-Eventually it'll also own the panel-itself control state (brightness, screen on/off, wifi config) — those are deferred until we wire up `nmcli`/backlight handlers.
+Eventually it'll also own the panel-itself control state (brightness, screen on/off, wifi config) — those are deferred until we wire up `nmcli`/backlight handlers in step 14.
 
 ## Layout
 
 ```
 panel_bridge/
-├── __main__.py     # entry point — wires everything together
+├── __main__.py     # entry point — wires everything together, gates call_service on ha_availability
 ├── config.py       # env-var overrides (UART port/baud, WS host/port)
-├── state.py        # in-memory cache, keyed by type[:name]
+├── state.py        # in-memory cache + ha_availability accessor
 ├── uart_link.py    # async UART reader/writer (pyserial-asyncio)
 └── ws_server.py    # WebSocket server (websockets) with snapshot-on-connect
 ```
@@ -67,10 +67,10 @@ In a second shell:
 
 What you should see:
 
-- On connect, an immediate burst of `[RX]` lines — the cached state replay (most recent proximity + ambient).
-- After that, a `[RX]` line every second from the C6's proximity update, and another every 5s from ambient.
-- Type a JSON line like `{"type":"hello","value":"from client"}` + Enter — it'll be forwarded to the C6, which currently logs it as `panel_app: UART RX (...): ...`.
+- On connect, an immediate burst of `[RX]` lines — the cached state replay (roster + per-entity state + sensors + ha_availability).
+- After that, a `[RX]` line every second for proximity, every 5s for ambient, and whenever any forwarded HA entity changes state.
+- Type a JSON line like `{"type":"call_service","entity_id":"light.foo","action":"light.toggle","data":{}}` + Enter — it'll be forwarded to the C6 → MQTT → integration → HA service call. (Only works when `ha_availability` is `online`.)
 
 ## Production
 
-A systemd unit lives in `../deploy/bridge.service` and starts the bridge on boot. (TBD — added during the kiosk-deploy step.)
+A systemd unit lives in `../deploy/panel-bridge.service` and starts the bridge on boot. (TBD — added during step 15.)

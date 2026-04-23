@@ -5,11 +5,13 @@ Panel UART smoke test — runs on the Pi, talks to the C6 over /dev/serial0.
 Reader thread prints every line received from the C6.
 Main thread reads stdin and forwards each line (newline-terminated) to the C6.
 
-Quick proofs:
-  - HA publish on panel/test/echo "hello loopback"
-      → here:  [HH:MM:SS.mmm] [RX] hello loopback
-  - Type {"hello":"pi"} <Enter> here
-      → mosquitto_sub on panel/test/from_pi sees {"hello":"pi"}
+Useful for debugging without the bridge in the loop — confirms the UART link
+itself is healthy. In normal operation `panel-bridge` owns this port, so stop
+it first (`systemctl stop panel-bridge` once that unit exists).
+
+What you'll see: a stream of `{"type":"sensor",...}`, `{"type":"entity_state",...}`,
+`{"type":"ha_availability",...}`, and `{"type":"roster",...}` lines from the C6.
+Typing a `{"type":"call_service",...}` JSON line + Enter forwards it upstream.
 
 Stop with Ctrl+C or Ctrl+D.
 """

@@ -2,18 +2,20 @@
 
 Touchscreen control panel for the PetLibro auto feeder.
 
-Panel-itself entities (reboot, wifi, brightness, screen, sensors) come from the shared platform discovery. Product-specific behavior:
+This is the **first product** on the Thread Control Panel platform — all HA state forwarding, availability handshake, MQTT schema, and UI plumbing are platform-shared; only the UI's layout and the reference manifest are product-specific.
 
-- **State mirrored from HA**: feeder on/off, upcoming feeding schedule
-- **Commands sent to HA**: `feed` (with quantity), `skip` (by feeding id), `toggle_feeder`
-
-See `manifest.yaml` for the full entity list and `../../docs/build_plan.md` for project status.
+## Layout
 
 ```
 feeding_control/
-├── firmware/      # ESP-IDF project
-├── ui/            # Vue+Vite app (TBD)
-├── ha/            # PetLibro bridge for the thread_panel integration (TBD)
-├── manifest.yaml
+├── firmware/      # ESP-IDF project (depends on platform/firmware/components/panel_platform)
+├── ui/            # Vue+Vite app (smoke-test scaffold, real layout comes in step 14)
+├── ha/            # reference manifest template + hatch for product-specific HA-side Python
 └── README.md
 ```
+
+## How product state reaches the panel
+
+The `thread_panel` custom HA integration takes a YAML manifest ([ha/manifest.yaml](ha/manifest.yaml) is a template — paste into HA's config flow), forwards every declared HA entity over MQTT + UART to the panel, and dispatches any `call_service` the panel fires back. The panel shows real PetLibro entities from HA rather than replicating any petlibro-specific logic on-device.
+
+See `../../docs/build_plan.md` for project status and the overall architecture.

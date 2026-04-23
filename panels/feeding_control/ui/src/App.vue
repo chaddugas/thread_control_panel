@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
-import { usePanelStore } from "@/stores/panel";
+import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { usePanelStore } from '@/stores/panel';
 
 const panel = usePanelStore();
 
@@ -35,9 +35,9 @@ const ambientAge = computed(() =>
     : null,
 );
 
-function sendTest(): void {
-  panel.send({ type: "hello", source: "ui", ts: Date.now() });
-}
+const toggleLight = (): void => {
+  panel.callService('light.chad_s_office_desk_lamp', 'light.toggle', {});
+};
 </script>
 
 <template>
@@ -47,53 +47,61 @@ function sendTest(): void {
       <p class="subtitle">scaffold smoke test</p>
     </header>
 
+    <button
+      @click="toggleLight"
+      :disabled="!panel.connected"
+    >
+      Toggle Light
+    </button>
+
     <section class="card status">
       <h2>Connection</h2>
-      <p
-        :class="[
-          'pill',
-          panel.connected ? 'pill-ok' : 'pill-warn',
-        ]"
-      >
-        {{ panel.connected ? "connected" : "disconnected" }}
+      <p :class="['pill', panel.connected ? 'pill-ok' : 'pill-warn']">
+        {{ panel.connected ? 'connected' : 'disconnected' }}
       </p>
       <p class="meta">{{ panel.wsUrl }}</p>
-      <p v-if="panel.lastError" class="error">{{ panel.lastError }}</p>
+      <p
+        v-if="panel.lastError"
+        class="error"
+      >
+        {{ panel.lastError }}
+      </p>
     </section>
 
     <section class="card">
       <h2>Proximity</h2>
       <template v-if="panel.proximity">
-        <p class="value">{{ panel.proximity.value }}<span class="unit">cm</span></p>
+        <p class="value">
+          {{ panel.proximity.value }}<span class="unit">cm</span>
+        </p>
         <p class="meta">
-          strength {{ panel.proximity.strength }}
-          · {{ proximityAge }}s ago
+          strength {{ panel.proximity.strength }} · {{ proximityAge }}s ago
         </p>
       </template>
-      <p v-else class="placeholder">awaiting first reading…</p>
+      <p
+        v-else
+        class="placeholder"
+      >
+        awaiting first reading…
+      </p>
     </section>
 
     <section class="card">
       <h2>Ambient brightness</h2>
       <template v-if="panel.ambient">
-        <p class="value">{{ panel.ambient.value }}<span class="unit">%</span></p>
+        <p class="value">
+          {{ panel.ambient.value }}<span class="unit">%</span>
+        </p>
         <p class="meta">
-          raw {{ panel.ambient.raw }}
-          · {{ panel.ambient.mv }} mV
-          · {{ ambientAge }}s ago
+          raw {{ panel.ambient.raw }} · {{ panel.ambient.mv }} mV ·
+          {{ ambientAge }}s ago
         </p>
       </template>
-      <p v-else class="placeholder">awaiting first reading…</p>
-    </section>
-
-    <section class="card">
-      <h2>Outgoing test</h2>
-      <button @click="sendTest" :disabled="!panel.connected">
-        Send hello to C6
-      </button>
-      <p class="meta">
-        Confirm by watching the C6 monitor for a
-        <code>panel_app: UART RX</code> log line.
+      <p
+        v-else
+        class="placeholder"
+      >
+        awaiting first reading…
       </p>
     </section>
   </main>
@@ -212,12 +220,5 @@ button:disabled {
   background: #374151;
   cursor: not-allowed;
   color: #6b7280;
-}
-
-code {
-  background: #0f0f17;
-  padding: 0.1rem 0.3rem;
-  border-radius: 3px;
-  font-size: 0.78rem;
 }
 </style>

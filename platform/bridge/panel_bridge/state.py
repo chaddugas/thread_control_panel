@@ -1,4 +1,8 @@
-"""In-memory cache of the latest message per (type, name) key.
+"""In-memory cache of the latest message per typed key.
+
+Keys are chosen per message type so multiple rows of the same type coexist
+in the snapshot: sensors key by `type:name`, entity state by
+`entity_state:entity_id`, singletons (roster, ha_availability) by `type`.
 
 Source of truth lives on the C6 / Pi sensors / HA — the cache exists so a
 fresh WebSocket client can see the current state immediately without

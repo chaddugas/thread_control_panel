@@ -25,6 +25,13 @@ CONFIG_OPENTHREAD_BORDER_ROUTER=n
 CONFIG_OPENTHREAD_DNS64_CLIENT=y
 CONFIG_OPENTHREAD_TASK_SIZE=10240
 CONFIG_OPENTHREAD_CONSOLE_ENABLE=n
+# Device type: MTD (Minimal Thread Device / child). The C6 is a mains-
+# powered leaf — it doesn't need to route for anyone. FTD (the ESP-IDF
+# default) causes the C6 to promote to router and maintain links to every
+# neighboring router, which destabilizes the mesh under retained-message
+# bursts. MTD picks one parent and sticks with it.
+# CONFIG_OPENTHREAD_FTD is not set
+CONFIG_OPENTHREAD_MTD=y
 # end of OpenThread
 
 #

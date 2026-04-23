@@ -19,7 +19,7 @@ Small mid-step edits are fine and encouraged — better a slightly noisy diff th
 - **MQTT-over-Thread proven end-to-end with proper TLS validation.** C6 firmware connects to Mosquitto on HA box via Thread → OTBR → LAN IPv6, authenticates with TLS using a Let's Encrypt cert chain validated against the ISRG Root X1 CA, publishes and subscribes successfully. Hostname verification is enabled (no `skip_cert_common_name_check`). The C6 resolves the broker via DNS through AdGuard, no IP literals in firmware.
 - Thread architecture validated: XIAO ESP32-C6 joins mesh, gets routable IPv6 via OTBR.
 - Pi Zero 2 W set up with SSH; PL011 enabled on GPIO 14/15 (Bluetooth disabled to free the full UART).
-- **C6 ↔ Pi UART bridge proven end-to-end** at 115200 over the Pi's PL011. HA → MQTT → C6 → UART → Pi reads the line; Pi writes a line → C6 → MQTT publish → HA sees it on `panel/test/from_pi`.
+- **C6 ↔ Pi UART bridge proven end-to-end** at 115200 over the Pi's PL011. HA entity state flows HA → integration → MQTT → C6 → UART → Pi → WS → UI; UI `call_service` commands flow the reverse path and dispatch against real HA entities.
 - **Waveshare 6.25" display + touch working** via direct framebuffer (`/dev/fb0`, RGB565) + evdev. See `platform/diagnostics/touch_test.py`. Pygame did not work on this setup; production UI will use Vue 3 + Vite + Pinia served via Chromium-kiosk under `cage`.
 - **Monorepo scaffold landed.** `platform/` (firmware component, bridge, ui-core, ha-integration, deploy, diagnostics) + `panels/feeding_control/` (firmware, ui, ha, manifest). Existing firmware and Pi diagnostics migrated. App entrypoint (`panels/feeding_control/firmware/main/app_main.c`) is now three lines: `panel_platform_init() → panel_app_init() → panel_net_start()`.
 - **Sensors live on the C6, not the Pi.** TEMT6000 ambient on ADC1 CH0 (D0). TF-Mini Plus LiDAR on UART0 routed to D3/D4 (115200). Both are read by `panel_platform`, published to MQTT (`thread_panel/feeding_control/state/{proximity,ambient_brightness}`), and forwarded as JSON lines over UART to the Pi. Originally planned to use MCP3008 ADC on the Pi; pivoted because the C6 has built-in ADC + spare UARTs and the data flow is more direct (no Pi-as-middleman for HA-bound state).
@@ -252,9 +252,11 @@ Either side can ignore messages it doesn't understand. Both sides log everything
 - MQTT client connects to `mqtts://the-interstitial-space.duckdns.org:8883` with TLS, with full hostname verification, over Thread
 - DNS resolved via AdGuard at HA's static ULA (`PANEL_DNS_SERVER` in `panel_platform_config.h`), configured into lwIP at boot
 - Authenticates via username/password (HA user: `mqtt_user`, note underscore)
-- Subscribes to `panel/test/echo`, publishes to `panel/test/hello`, mirrors received MQTT data to UART, mirrors received UART lines to `panel/test/from_pi`
+- Subscribes to `thread_panel/<panel_id>/ha_availability`, `state/entity/#`, and `state/_roster`; wraps each payload with a typed envelope and forwards over UART to the Pi. Routes outbound `call_service` UART lines to `cmd/call_service` for the integration to dispatch.
+- Gates its own state publishes (sensors) and command routing on `ha_availability == online`. Maintains cached last sensor values; republishes on `offline → online` transition.
 - Verified in Mosquitto log: TLS negotiated, client authenticated, cert chain validated against ISRG Root X1
 - MQTT start gated on **both** Thread role attach and an OMR address being acquired (avoids a premature `getaddrinfo()` race against OTBR's RA)
+- Device role: MTD (Minimal Thread Device / child) — picks one parent, avoids the neighbor-maintenance obligations that were destabilizing the mesh under load when the C6 was an FTD router.
 
 **Key sdkconfig flags (important — don't lose):**
 - `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y` — for input to work over USB
@@ -343,14 +345,13 @@ esp_mqtt_client_config_t mqtt_cfg = {
 
 10. ~~**UI scaffold (`panels/feeding_control/ui/`)**~~ ✅ DONE (real layout/components TBD)
     - Vue 3 + Vite + Pinia + TypeScript + bare scoped styles (no UI lib, no Tailwind)
-    - `stores/panel.ts` wraps the bridge WebSocket: connect/reconnect with 1s backoff, snapshot replay on connect, action helpers (`feed`/`skip`/`toggleFeeder`)
-    - `App.vue` smoke test: connection pill, proximity card, ambient card, send-test-message button
+    - `stores/panel.ts` wraps the bridge WebSocket: connect/reconnect with 1s backoff, snapshot replay on connect, reactive `haAvailability` / `roster` / `entities`, generic `callService(entityId, action, data)` action helper
+    - `App.vue` scaffold view: connection pill, proximity card, ambient card, one "Toggle Light" smoke-test button wired to `callService`
     - Discriminated unions for incoming/outgoing WS messages in `src/types.ts`
     - WS URL via `import.meta.env.VITE_WS_URL`, defaults to `ws://${location.hostname}:8765`; `.env.local` for Mac→Pi dev
-    - Verified end-to-end: live sensor cards + button-press → C6 `panel_app: UART RX` log
-    - Real layout, controls, and `platform/ui-core` extraction are step 13's scope.
+    - Real layout, controls, and `platform/ui-core` extraction are step 14's scope.
 
-11. **Custom HA integration: generic entity forwarder (`custom_components/thread_panel/`) + C6 availability gating** (in progress — HA + C6 sides done 2026-04-23, bridge + UI remaining)
+11. ~~**Custom HA integration: generic entity forwarder (`custom_components/thread_panel/`) + C6 availability gating**~~ ✅ DONE 2026-04-23 — end-to-end verified: toggle button in UI → WS → bridge → UART → C6 → MQTT → integration → HA service call → entity state update flows back through the same pipe and updates the UI store. Known parallel issue: Thread mesh flapping causes intermittent command loss (see Technical Debt → Outstanding).
 
     HA side (`custom_components/thread_panel/` — at the repo root so HACS accepts it):
     - Config flow accepts the manifest YAML pasted directly. Reference templates live at `panels/<id>/ha/manifest.yaml` in the repo; users copy, adjust entity_ids, paste. (Originally planned as path-based in Day 1 with paste as Day-2 migration — promoted to Day 1 because HACS doesn't deploy `panels/<id>/ha/` onto the HA box, so there's no filesystem path to point at. Day-2 now: an interactive entity picker.)
@@ -372,8 +373,9 @@ esp_mqtt_client_config_t mqtt_cfg = {
     C6 side (`panel_platform`):
     - Subscribe to `ha_availability`; forward value over UART as `{"type":"ha_availability","value":"..."}`.
     - Subscribe to `state/entity/#` and `state/_roster`. On every inbound message, wrap the payload with a typed envelope (`{"type":"entity_state","entity_id":"...",<state/attrs>}` or `{"type":"roster",<entities list>}`) and forward over UART. Retained semantics mean subscribe alone redelivers the full current snapshot to the Pi.
+    - Route **outbound** UART commands from the Pi to the right MQTT topic. For V1: `{"type":"call_service",...}` lines publish to `thread_panel/<panel_id>/cmd/call_service` verbatim — the integration tolerates the extra `type` field.
     - Add in-RAM last-values cache for sensor publishes (ambient, proximity).
-    - Gate periodic state publishes on `ha_availability == online`. On `offline → online` transition, republish current sensor values once before resuming normal cadence.
+    - Gate periodic state publishes on `ha_availability == online`, and gate UART command routing on the same flag. On `offline → online` transition, republish current sensor values once before resuming normal cadence.
 
     Bridge side:
     - Consume `ha_availability` from UART, surface in WS snapshot + broadcasts.
@@ -383,7 +385,7 @@ esp_mqtt_client_config_t mqtt_cfg = {
     - Expose `ha_availability` through the `panel` store so product UIs can render loading/offline overlays.
     - Product UIs choose their own UX for the offline state; platform just provides the signal.
 
-12. **Panel-itself entity representation in HA**
+12. **Panel-itself entity representation in HA** (next up)
     - Panel shows up as a device in HA with entities for reboot, wifi, brightness, screen, sensors, availability.
     - Two implementation options — decide after step 11 exposes which is less friction:
       - *Inside the custom integration (preferred on current reasoning):* entity classes (`SwitchEntity`, `SensorEntity`, `NumberEntity`, etc.) that subscribe to the panel's MQTT topics and present them as HA entities. One device, one integration, no firmware-side discovery publishing.
@@ -401,15 +403,14 @@ esp_mqtt_client_config_t mqtt_cfg = {
     - Extract platform-shaped code from `stores/panel.ts` into `platform/ui-core/` as part of this work: WS connection + reconnect, snapshot replay, availability handling, entity-state consumption (`state/entity/*`), `call_service` dispatch. The line is now clear — that's all platform. Everything else (layout, components, product-specific logic) stays in the product.
     - Panel-itself control owners in the bridge (brightness, screen, wifi; deferred from step 9) get wired here, since we finally know which controls the UI surfaces.
 
-15. **Kiosk deployment**
-    - `cage` + Chromium installed on the Pi
-    - systemd units launch bridge + kiosk on boot
-    - `tools/deploy.sh` for git-pull-based deploys
-
-16. **Enclosure**
+15. **Enclosure**
     - Shapr3D design
     - P1S print
     - Cable management
+
+16. **Kiosk deployment**
+    - ✅ Bridge systemd unit already landed at `platform/deploy/panel-bridge.service` (2026-04-23) — the bridge auto-starts on boot, pulls latest on each start, and restarts on failure.
+    - Remaining: `cage` + Chromium install on the Pi; a `cage.service` unit that launches Chromium in kiosk mode pointing at the UI; a deploy path for the UI `dist/` bundle (rsync from Mac, or a build step inside the deploy script).
 
 ## Technical Debt
 
@@ -417,6 +418,7 @@ esp_mqtt_client_config_t mqtt_cfg = {
 
 - ~~TLS hostname verification disabled~~ — fixed by switching to ISRG Root X1 as embedded CA + duckdns hostname in URI + AdGuard rewrite for resolution.
 - ~~Hardcoded HA IPv6 fragility (regenerated on reboot)~~ — fixed by pinning static ULA `fd00:9db1:1410:d98c::10` on HA via `ha network update`. URI now uses hostname, not IP literal.
+- ~~Thread mesh flapping under load~~ — fixed by switching C6 from FTD to MTD in `sdkconfig.defaults` (`CONFIG_OPENTHREAD_MTD=y`). As a Minimal Thread Device, the C6 picks one parent and stops juggling multi-router obligations. Verified 2026-04-23 via runtime `mode rn` test — mesh errors dropped to normal background levels, commands flowed reliably. The baseline of "occasional `Failed to process Link Request: InvalidState`" + "rare isolated `NoAck`" is expected Thread mesh noise, not our problem.
 
 ### Outstanding
 

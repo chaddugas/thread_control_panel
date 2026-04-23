@@ -68,28 +68,7 @@ export interface CallServiceCommand {
   data: Record<string, unknown>;
 }
 
-// Legacy POC commands — still here because App.vue's smoke-test button
-// calls toggleFeeder. Will be removed when the real product UI lands in
-// step 14.
-export interface FeedCommand {
-  type: "feed";
-  quantity: number;
-}
-
-export interface SkipCommand {
-  type: "skip";
-  feeding_id: string;
-}
-
-export interface ToggleFeederCommand {
-  type: "toggle_feeder";
-}
-
-export type OutgoingCommand =
-  | CallServiceCommand
-  | FeedCommand
-  | SkipCommand
-  | ToggleFeederCommand;
+export type OutgoingCommand = CallServiceCommand;
 
 // ---- Derived state shapes used by the store ----
 

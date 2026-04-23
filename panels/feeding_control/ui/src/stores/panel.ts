@@ -4,14 +4,14 @@
  * cached state on connect, broadcasts updates as Pinia state, exposes
  * action helpers for outgoing commands.
  *
- * Most of this file is platform-shaped (WS lifecycle, reconnect, sensor
- * state). When a second panel exists, the WS plumbing + sensor state
- * should promote to `platform/ui-core/`. The product-specific bits are
- * the action helpers (feed, skip, toggle_feeder).
+ * Most of this file is platform-shaped (WS lifecycle, availability,
+ * entity roster/state). The `callService` helper is the only outgoing
+ * action primitive today; product UIs build their interactions on top.
+ * When `platform/ui-core/` gets extracted in step 14, all of this moves.
  */
 
-import { defineStore } from "pinia";
-import { ref } from "vue";
+import { defineStore } from 'pinia';
+import { ref } from 'vue';
 import type {
   EntityState,
   IncomingMessage,
@@ -19,7 +19,7 @@ import type {
   RosterEntry,
   SensorAmbientMessage,
   SensorProximityMessage,
-} from "@/types";
+} from '@/types';
 
 interface ProximityState extends SensorProximityMessage {
   receivedAt: number;
@@ -28,14 +28,13 @@ interface AmbientState extends SensorAmbientMessage {
   receivedAt: number;
 }
 
-type HaAvailability = "online" | "offline" | null;
+type HaAvailability = 'online' | 'offline' | null;
 
 const RECONNECT_DELAY_MS = 1000;
 
-const wsUrl =
-  import.meta.env.VITE_WS_URL ?? `ws://${location.hostname}:8765`;
+const wsUrl = import.meta.env.VITE_WS_URL ?? `ws://${location.hostname}:8765`;
 
-export const usePanelStore = defineStore("panel", () => {
+export const usePanelStore = defineStore('panel', () => {
   // ---- reactive state ----
   const connected = ref(false);
   const lastError = ref<string | null>(null);
@@ -67,18 +66,18 @@ export const usePanelStore = defineStore("panel", () => {
       lastError.value = null;
     };
 
-    ws.onmessage = (ev) => {
+    ws.onmessage = ev => {
       let raw: unknown;
       try {
         raw = JSON.parse(ev.data);
       } catch {
-        console.warn("non-JSON from bridge:", ev.data);
+        console.warn('non-JSON from bridge:', ev.data);
         return;
       }
       if (
-        typeof raw !== "object" ||
+        typeof raw !== 'object' ||
         raw === null ||
-        typeof (raw as { type?: unknown }).type !== "string"
+        typeof (raw as { type?: unknown }).type !== 'string'
       ) {
         return;
       }
@@ -88,7 +87,7 @@ export const usePanelStore = defineStore("panel", () => {
     ws.onerror = () => {
       // Browsers don't surface useful detail in onerror — close handler
       // gives us the actionable signal.
-      lastError.value = "WebSocket error (see console)";
+      lastError.value = 'WebSocket error (see console)';
     };
 
     ws.onclose = () => {
@@ -118,18 +117,18 @@ export const usePanelStore = defineStore("panel", () => {
   }
 
   function handleMessage(msg: IncomingMessage): void {
-    if (msg.type === "sensor") {
+    if (msg.type === 'sensor') {
       const now = Date.now();
-      if (msg.name === "proximity") {
+      if (msg.name === 'proximity') {
         proximity.value = { ...msg, receivedAt: now };
-      } else if (msg.name === "ambient") {
+      } else if (msg.name === 'ambient') {
         ambient.value = { ...msg, receivedAt: now };
       }
-    } else if (msg.type === "ha_availability") {
+    } else if (msg.type === 'ha_availability') {
       haAvailability.value = msg.value;
-    } else if (msg.type === "roster") {
+    } else if (msg.type === 'roster') {
       roster.value = msg.entities;
-    } else if (msg.type === "entity_state") {
+    } else if (msg.type === 'entity_state') {
       entities.value = {
         ...entities.value,
         [msg.entity_id]: { state: msg.state, attributes: msg.attributes },
@@ -162,25 +161,11 @@ export const usePanelStore = defineStore("panel", () => {
     data: Record<string, unknown> = {},
   ): boolean {
     return send({
-      type: "call_service",
+      type: 'call_service',
       entity_id: entityId,
       action,
       data,
     });
-  }
-
-  // ---- legacy POC helpers (to be removed in step 14) ----
-
-  function feed(quantity: number): boolean {
-    return send({ type: "feed", quantity });
-  }
-
-  function skip(feedingId: string): boolean {
-    return send({ type: "skip", feeding_id: feedingId });
-  }
-
-  function toggleFeeder(): boolean {
-    return send({ type: "toggle_feeder" });
   }
 
   return {
@@ -200,10 +185,6 @@ export const usePanelStore = defineStore("panel", () => {
     // actions
     callService,
     entity,
-    // legacy
-    feed,
-    skip,
-    toggleFeeder,
     // diagnostic
     wsUrl,
   };

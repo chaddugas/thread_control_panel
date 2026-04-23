@@ -132,16 +132,26 @@ static void on_uart_line(const char *line, size_t len)
 
     if (!s_ha_online)
     {
+        ESP_LOGW(TAG, "UART line dropped — ha_availability is offline");
         return;
     }
-    // POC: forward the raw line to a debug MQTT topic so the full
-    // Pi → UART → C6 → MQTT → HA path can be verified before the real
-    // command schema lands.
-    int msg_id = panel_net_publish(PANEL_TOPIC_FROM_PI, line, (int)len, 0, 0);
-    if (msg_id < 0)
+
+    // Route by message type. For V1 the Pi only sends call_service
+    // commands; add new branches here when other outbound types appear.
+    // Substring match is sufficient because the bridge emits these as
+    // flat objects; nothing else would legitimately contain that pattern.
+    if (strstr(line, "\"type\":\"call_service\"") != NULL)
     {
-        ESP_LOGW(TAG, "UART line dropped — MQTT not connected");
+        int msg_id = panel_net_publish(PANEL_TOPIC_CMD_CALL_SERVICE,
+                                       line, (int)len, 0, 0);
+        if (msg_id < 0)
+        {
+            ESP_LOGW(TAG, "call_service publish failed — MQTT not connected");
+        }
+        return;
     }
+
+    ESP_LOGW(TAG, "UART line has no known routing, dropping: %s", line);
 }
 
 // Forward the current ha_availability value to the Pi bridge so the WS
@@ -205,19 +215,16 @@ void panel_app_init(void)
 
 void panel_app_on_connected(esp_mqtt_client_handle_t client)
 {
-    int msg_id = esp_mqtt_client_subscribe(client, PANEL_TOPIC_ECHO, 0);
-    ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d", PANEL_TOPIC_ECHO, msg_id);
-
-    // Subscribe to the HA integration's readiness topic. Retained message
-    // will arrive immediately if HA is already online.
-    msg_id = esp_mqtt_client_subscribe(client, PANEL_TOPIC_HA_AVAILABILITY, 0);
+    // Readiness signal. Retained message delivers immediately if HA is
+    // already online.
+    int msg_id = esp_mqtt_client_subscribe(client,
+                                           PANEL_TOPIC_HA_AVAILABILITY, 0);
     ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d",
              PANEL_TOPIC_HA_AVAILABILITY, msg_id);
 
-    // Forwarded HA entities — retained state of every declared entity plus
-    // the roster. Broker will redeliver the current retained value for
-    // each on subscribe, so we hand the Pi a complete snapshot as a side
-    // effect of subscribing.
+    // Forwarded HA entities + roster. Retained state for each declared
+    // entity_id is redelivered on subscribe, so we hand the Pi a complete
+    // snapshot as a side effect.
     msg_id = esp_mqtt_client_subscribe(client,
                                        PANEL_TOPIC_STATE_ENTITY_WILDCARD, 0);
     ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d",
@@ -226,10 +233,6 @@ void panel_app_on_connected(esp_mqtt_client_handle_t client)
     msg_id = esp_mqtt_client_subscribe(client, PANEL_TOPIC_STATE_ROSTER, 0);
     ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d",
              PANEL_TOPIC_STATE_ROSTER, msg_id);
-
-    msg_id = esp_mqtt_client_publish(client, PANEL_TOPIC_HELLO,
-                                     PANEL_HELLO_PAYLOAD, 0, 1, 0);
-    ESP_LOGI(TAG, "Published hello message, msg_id=%d", msg_id);
 }
 
 // Buffer size for the wrapped UART line we forward to the Pi. Must be big
@@ -324,8 +327,8 @@ void panel_app_on_data(esp_mqtt_client_handle_t client,
         return;
     }
 
-    // Unmatched topic — log only. The legacy POC echo (panel/test/echo)
-    // lands here; no longer forwarded to UART as that was debug-only.
-    ESP_LOGI(TAG, "Data on %.*s: %.*s",
+    // Unmatched topic — log only. Shouldn't happen in practice unless a
+    // subscription list is added above without a matching handler.
+    ESP_LOGW(TAG, "Data on unhandled topic %.*s: %.*s",
              topic_len, topic, data_len, data);
 }
