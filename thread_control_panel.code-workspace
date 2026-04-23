@@ -1,0 +1,78 @@
+{
+  "folders": [
+    {
+      "name": "thread_control_panel",
+      "path": "."
+    },
+    {
+      "name": "platform: firmware",
+      "path": "platform/firmware"
+    },
+    {
+      "name": "platform: bridge",
+      "path": "platform/bridge"
+    },
+    {
+      "name": "platform: ui-core",
+      "path": "platform/ui-core"
+    },
+    {
+      "name": "platform: ha-integration",
+      "path": "platform/ha-integration"
+    },
+    {
+      "name": "platform: diagnostics",
+      "path": "platform/diagnostics"
+    },
+    {
+      "name": "platform: deploy",
+      "path": "platform/deploy"
+    },
+    {
+      "name": "feeding_control: firmware",
+      "path": "panels/feeding_control/firmware"
+    },
+    {
+      "name": "feeding_control: ui",
+      "path": "panels/feeding_control/ui"
+    },
+    {
+      "name": "feeding_control: ha",
+      "path": "panels/feeding_control/ha"
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "platform": true,
+      "panels": true
+    },
+    "search.exclude": {
+      "**/build": true,
+      "**/managed_components": true,
+      "**/node_modules": true,
+      "**/dist": true,
+      "**/.venv": true,
+      "**/__pycache__": true
+    },
+    "files.watcherExclude": {
+      "**/build/**": true,
+      "**/managed_components/**": true,
+      "**/node_modules/**": true,
+      "**/.venv/**": true
+    },
+    "files.associations": {
+      "*.yaml": "yaml",
+      "manifest.yaml": "yaml"
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "espressif.esp-idf-extension",
+      "ms-python.python",
+      "ms-python.vscode-pylance",
+      "vue.volar",
+      "dbaeumer.vscode-eslint",
+      "redhat.vscode-yaml"
+    ]
+  }
+}

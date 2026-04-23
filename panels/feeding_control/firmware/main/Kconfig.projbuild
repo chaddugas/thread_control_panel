@@ -1,0 +1,29 @@
+menu "Thread Panel — feeding_control"
+
+    config MQTT_BROKER_URI
+        string "MQTT broker URI"
+        default "mqtts://homeassistant.local:8883"
+        help
+            URI of the MQTT broker. Use mqtts:// for TLS.
+
+    config MQTT_USERNAME
+        string "MQTT username"
+        default ""
+        help
+            Username for MQTT authentication.
+
+    config MQTT_PASSWORD
+        string "MQTT password"
+        default ""
+        help
+            Password for MQTT authentication. This is stored in sdkconfig
+            in plaintext — keep sdkconfig out of version control.
+
+    config MQTT_CLIENT_ID
+        string "MQTT client ID"
+        default "thread_panel_feeding_control"
+        help
+            Client ID the C6 uses when connecting to the broker.
+
+endmenu
+

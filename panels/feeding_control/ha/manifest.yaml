@@ -1,0 +1,26 @@
+# Integration-facing manifest for the feeding_control panel.
+#
+# Consumed by the thread_panel custom HA integration. Each entry here declares
+# one HA entity to forward to the panel:
+#   entity_id:  the full HA entity_id (domain.object_id) to mirror.
+#   attributes: list of attribute keys to forward alongside state.
+#               omit or leave empty to forward state only.
+#
+# Entity IDs below are placeholders — replace with the real PetLibro entity IDs
+# in your Home Assistant install.
+
+panel_id: feeding_control
+
+entities:
+  - entity_id: switch.pet_feeder
+    attributes: []
+
+  - entity_id: sensor.pet_feeder_schedule
+    attributes:
+      - schedule
+      - next_feed_time
+
+  - entity_id: sensor.pet_feeder_last_fed
+    attributes:
+      - timestamp
+      - quantity

@@ -1,0 +1,19 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Thread Panel",
+        "description": "Paste the panel's manifest YAML below. Reference templates for each product live in the repository under panels/<id>/ha/manifest.yaml — copy one, adjust the entity_ids to match your Home Assistant install, and paste the result here.",
+        "data": {
+          "manifest_yaml": "Manifest YAML"
+        }
+      }
+    },
+    "error": {
+      "invalid_manifest": "Manifest could not be parsed. See the Home Assistant log for details."
+    },
+    "abort": {
+      "already_configured": "A panel with this panel_id is already configured."
+    }
+  }
+}

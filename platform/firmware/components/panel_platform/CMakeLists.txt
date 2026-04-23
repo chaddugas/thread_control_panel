@@ -1,0 +1,24 @@
+idf_component_register(
+    SRCS
+        "panel_platform.c"
+        "panel_net.c"
+        "panel_uart.c"
+        "panel_sensors.c"
+        "panel_lidar.c"
+    INCLUDE_DIRS
+        "include"
+        "."
+    PRIV_REQUIRES
+        openthread
+        mqtt
+        esp-tls
+        nvs_flash
+        lwip
+        esp_driver_uart
+        esp_adc
+        esp_event
+        esp_netif
+        vfs
+    EMBED_TXTFILES
+        "certs/ca_cert.pem"
+)

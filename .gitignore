@@ -1,0 +1,34 @@
+# ESP-IDF build artifacts
+build/
+managed_components/
+sdkconfig.old
+dependencies.lock
+
+# sdkconfig contains plaintext MQTT credentials per build_plan.md.
+# Each panel firmware tree generates its own; never commit them.
+sdkconfig
+
+# Node / Vite
+node_modules/
+dist/
+.vite/
+*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+.idea/
+*.swp
+*.swo
+*~
+
+# Local-only IDE settings (the IDE-shared ones are committed under .vscode/)
+.vscode/*.local
+.vscode/launch.json

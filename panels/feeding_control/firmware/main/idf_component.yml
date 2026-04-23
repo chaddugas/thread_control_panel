@@ -1,0 +1,6 @@
+## Product main dependencies. Platform-shared deps (openthread, ot_examples_common,
+## ot_led, esp_ot_cli_extension) live in platform/firmware/components/panel_platform.
+dependencies:
+  idf:
+    version: '>=4.1.0'
+  espressif/mqtt: '*'
