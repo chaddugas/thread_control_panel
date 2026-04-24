@@ -8,6 +8,9 @@ from typing import Any
 
 from homeassistant.components import mqtt
 from homeassistant.core import Event, HomeAssistant, State, callback
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 
@@ -107,15 +110,35 @@ class PanelForwarder:
         await mqtt.async_publish(self.hass, self._t_availability(), value, retain=True)
 
     async def _publish_roster(self) -> None:
+        entity_reg = er.async_get(self.hass)
+        device_reg = dr.async_get(self.hass)
+        area_reg = ar.async_get(self.hass)
+
         entries = []
         for decl in self.manifest.entities:
             state = self.hass.states.get(decl.entity_id)
+            friendly_name = (
+                state.attributes.get("friendly_name") if state else None
+            )
+            area_name: str | None = None
+            entry = entity_reg.async_get(decl.entity_id)
+            if entry is not None:
+                # Entities can have their own area override, or inherit
+                # from their device's area. Try entity first, fall back.
+                area_id = entry.area_id
+                if area_id is None and entry.device_id is not None:
+                    device = device_reg.async_get(entry.device_id)
+                    if device is not None:
+                        area_id = device.area_id
+                if area_id is not None:
+                    area = area_reg.async_get_area(area_id)
+                    if area is not None:
+                        area_name = area.name
             entries.append(
                 {
                     "entity_id": decl.entity_id,
-                    "friendly_name": (
-                        state.attributes.get("friendly_name") if state else None
-                    ),
+                    "friendly_name": friendly_name,
+                    "area": area_name,
                 }
             )
         await mqtt.async_publish(

@@ -2,7 +2,11 @@
   "extends": "@vue/tsconfig/tsconfig.dom.json",
   "compilerOptions": {
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@thread-panel/ui-core": ["../../../platform/ui-core/src"],
+      "@thread-panel/ui-core/*": ["../../../platform/ui-core/src/*"],
+      "vue": ["./node_modules/vue"],
+      "pinia": ["./node_modules/pinia"]
     },
     "strict": true,
     "noUnusedLocals": true,

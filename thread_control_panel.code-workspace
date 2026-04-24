@@ -5,6 +5,10 @@
       "path": "."
     },
     {
+      "name": "integration: thread_panel",
+      "path": "custom_components/thread_panel"
+    },
+    {
       "name": "platform: firmware",
       "path": "platform/firmware"
     },
@@ -15,10 +19,6 @@
     {
       "name": "platform: ui-core",
       "path": "platform/ui-core"
-    },
-    {
-      "name": "platform: ha-integration",
-      "path": "platform/ha-integration"
     },
     {
       "name": "platform: diagnostics",
@@ -43,6 +43,7 @@
   ],
   "settings": {
     "files.exclude": {
+      "custom_components": true,
       "platform": true,
       "panels": true
     },
@@ -63,7 +64,11 @@
     "files.associations": {
       "*.yaml": "yaml",
       "manifest.yaml": "yaml"
-    }
+    },
+    "python.defaultInterpreterPath": "${workspaceFolder:thread_control_panel}/.venv/bin/python",
+    "python.analysis.extraPaths": [
+      "${workspaceFolder:thread_control_panel}/platform/bridge"
+    ]
   },
   "extensions": {
     "recommendations": [

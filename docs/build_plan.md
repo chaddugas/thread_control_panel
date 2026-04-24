@@ -367,7 +367,7 @@ esp_mqtt_client_config_t mqtt_cfg = {
     - `panels/<id>/ha/` is a hatch for non-entity-shaped product data; expected to be empty for `feeding_control` V1.
 
     Follow-ups (HA side — not blocking Phase B/C):
-    - **Options flow for in-place reconfig.** Currently the only way to edit the manifest is delete + re-add the config entry. An `OptionsFlowHandler` with a pre-filled YAML paste field would let users add/remove entities in place. Enforce `panel_id` stability (reject edits that change it, since it's the unique_id anchor). The existing Store-based stale-topic cleanup already handles entity removal on reload.
+    - ~~Options flow for in-place reconfig~~ ✅ DONE 2026-04-24. `OptionsFlowHandler` lets users edit the manifest YAML in place; validation rejects any change that mutates `panel_id`. Stale-topic cleanup via the existing `Store` handles entity removal automatically on reload.
     - Roster `area` field — needs entity_registry + device_registry joins. Nice-to-have.
 
     C6 side (`panel_platform`):
@@ -422,11 +422,12 @@ esp_mqtt_client_config_t mqtt_cfg = {
 
     **E3 — Mac-side `panel-ota` CLI tool**: lives in `tools/`. Builds firmware, starts `python3 -m http.server` in the build dir, detects Mac's LAN IP via kernel-route trick, publishes `cmd/ota` to `thread_panel/feeding_control/cmd/ota` with the URL, tails the MQTT `availability` topic to watch for the C6's reboot (offline flap then online), shuts down the HTTP server.
 
-14. **`feeding_control` product UI (`panels/feeding_control/ui/`) + `platform/ui-core/` extraction**
-    - Real UI for the pet feeder: schedule view, feed/skip/toggle controls, panel-itself surfaces (brightness, screen, wifi status), offline overlay driven by `ha_availability`.
+14. **`feeding_control` product UI (`panels/feeding_control/ui/`)**
+    - Real UI for the pet feeder: schedule view, feed/skip/toggle controls, panel-itself surfaces (screen, wifi status), offline overlay driven by `ha_availability`.
     - Built against live data from steps 11/12.
-    - Extract platform-shaped code from `stores/panel.ts` into `platform/ui-core/` as part of this work: WS connection + reconnect, snapshot replay, availability handling, entity-state consumption (`state/entity/*`), `call_service` dispatch. The line is now clear — that's all platform. Everything else (layout, components, product-specific logic) stays in the product.
-    - Panel-itself control owners in the bridge (brightness, screen, wifi; deferred from step 9) get wired here, since we finally know which controls the UI surfaces.
+    - ~~`platform/ui-core/` extraction~~ ✅ DONE 2026-04-24 as part of cleanup. Platform-shaped code (WS connection + reconnect, snapshot replay, availability, entity-state, `callService`) now lives in `platform/ui-core/src/` and is consumed via the `@thread-panel/ui-core` path alias. Product UIs only carry layout + product-specific behavior.
+    - Panel-itself control owners in the bridge (screen, wifi, reboot) landed in step 11 D2 — UI can call them directly via the existing switch/button entities in HA or the WS `callService` (TBD: product UI decides which route).
+    - Brightness remains deferred — Waveshare display has no software-controllable backlight; revisit in step 16 via Wayland gamma overlay after cage lands.
 
 15. **Enclosure**
     - Shapr3D design
@@ -441,6 +442,7 @@ esp_mqtt_client_config_t mqtt_cfg = {
 
 ### Resolved
 
+- ~~panel-bridge.sh aborts on no-network pip install~~ — fixed 2026-04-24. `pip install -e` failure now logs a warning and continues with stale deps; marker isn't touched so next boot retries. Survives WiFi-off production boots where `pyproject.toml` may look newer-than-marker.
 - ~~TLS hostname verification disabled~~ — fixed by switching to ISRG Root X1 as embedded CA + duckdns hostname in URI + AdGuard rewrite for resolution.
 - ~~Hardcoded HA IPv6 fragility (regenerated on reboot)~~ — fixed by pinning static ULA `fd00:9db1:1410:d98c::10` on HA via `ha network update`. URI now uses hostname, not IP literal.
 - ~~Thread mesh flapping under load~~ — fixed by switching C6 from FTD to MTD in `sdkconfig.defaults` (`CONFIG_OPENTHREAD_MTD=y`). As a Minimal Thread Device, the C6 picks one parent and stops juggling multi-router obligations. Verified 2026-04-23 via runtime `mode rn` test — mesh errors dropped to normal background levels, commands flowed reliably. The baseline of "occasional `Failed to process Link Request: InvalidState`" + "rare isolated `NoAck`" is expected Thread mesh noise, not our problem.

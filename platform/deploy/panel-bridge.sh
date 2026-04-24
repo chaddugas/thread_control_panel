@@ -28,8 +28,13 @@ fi
 
 if [ ! -f "$MARKER" ] || [ "$BRIDGE_DIR/pyproject.toml" -nt "$MARKER" ]; then
     echo "→ Deps changed, syncing..."
-    "$BRIDGE_DIR/.venv/bin/python" -m pip install -e "$BRIDGE_DIR" --quiet
-    touch "$MARKER"
+    if "$BRIDGE_DIR/.venv/bin/python" -m pip install -e "$BRIDGE_DIR" --quiet; then
+        touch "$MARKER"
+    else
+        echo "panel-bridge: pip install failed (no network?) — starting with stale deps" >&2
+        # Intentionally don't touch the marker; we'll retry on the next
+        # boot when network is available.
+    fi
 fi
 
 echo "→ Starting bridge..."

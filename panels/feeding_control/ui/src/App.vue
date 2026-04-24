@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { usePanelStore } from '@/stores/panel';
+import { usePanelStore } from '@thread-panel/ui-core';
 
 const panel = usePanelStore();
 

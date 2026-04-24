@@ -9,6 +9,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "@thread-panel/ui-core": fileURLToPath(
+        new URL("../../../platform/ui-core/src", import.meta.url),
+      ),
     },
   },
   server: {

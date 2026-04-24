@@ -1,13 +1,11 @@
 /**
- * Panel store — single source of truth for what the UI knows about the
- * panel. Wraps the bridge WebSocket: connects on app mount, replays
- * cached state on connect, broadcasts updates as Pinia state, exposes
- * action helpers for outgoing commands.
+ * Panel store — single source of truth for what any panel UI knows about
+ * the panel it's connected to. Wraps the bridge WebSocket: connects on
+ * app mount, replays cached state on connect, broadcasts updates as
+ * Pinia state, exposes action helpers for outgoing commands.
  *
- * Most of this file is platform-shaped (WS lifecycle, availability,
- * entity roster/state). The `callService` helper is the only outgoing
- * action primitive today; product UIs build their interactions on top.
- * When `platform/ui-core/` gets extracted in step 14, all of this moves.
+ * Platform-shaped. Every panel product's UI imports this store directly
+ * and layers its own product-specific views on top.
  */
 
 import { defineStore } from 'pinia';
@@ -19,7 +17,7 @@ import type {
   RosterEntry,
   SensorAmbientMessage,
   SensorProximityMessage,
-} from '@/types';
+} from './types';
 
 interface ProximityState extends SensorProximityMessage {
   receivedAt: number;

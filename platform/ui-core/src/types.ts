@@ -3,9 +3,6 @@
  *
  * The bridge forwards every JSON line from the C6 verbatim, so these
  * shapes mirror what the firmware emits in `panel_app.c`.
- *
- * Likely candidates for promotion to a shared `platform/ui-core/types.ts`
- * in step 14 (product UI) once we actually split platform / product code.
  */
 
 // ---- Incoming (bridge → UI) ----
@@ -30,6 +27,7 @@ export type SensorMessage = SensorProximityMessage | SensorAmbientMessage;
 export interface RosterEntry {
   entity_id: string;
   friendly_name: string | null;
+  area: string | null;
 }
 
 export interface RosterMessage {
