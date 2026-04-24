@@ -410,7 +410,7 @@ esp_mqtt_client_config_t mqtt_cfg = {
     - **Brightness (NumberEntity)**: the Waveshare 6.25" HDMI display doesn't expose a `/sys/class/backlight/*` interface. Revisit when either (a) the hardware is swapped for something with a controllable backlight, or (b) we ship the kiosk compositor and can do a Wayland gamma-overlay software dim.
     - **wifi_ssid / wifi_password / wifi_ssids (TextEntity + select)**: full credential management. Wire up when there's a real UX need; for now, nmcli on the Pi directly is sufficient.
 
-13. **OTA firmware updates over Thread** (in progress)
+13. ~~**OTA firmware updates over Thread**~~ ✅ DONE 2026-04-23
     - Motivation: the XIAO ESP32-C6 can't use USB and the 5V rail simultaneously. In the enclosure we can't easily pull the power-select pin, so USB flashing becomes impractical. Need a way to push new firmware without touching the board.
     - Approach decided 2026-04-23: **HTTP OTA over Thread, Mac-direct, no Pi involvement.** Mac builds, runs a transient HTTP server, publishes `cmd/ota` to the C6 with a firmware URL; C6 downloads via `esp_http_client`, writes to the idle OTA partition via ESP-IDF's `esp_ota_*` APIs, reboots. ESP-IDF's built-in app rollback: new firmware has a self-validation window after reboot; if it doesn't mark itself valid (crashes, fails to reach MQTT, etc.) the bootloader reverts on next reset. NAT64 on OTBR is enabled so the C6 can reach the Mac's IPv4 via its Thread IPv6 address. Pi is not in the OTA path; Pi WiFi can stay off.
     - Rejected alternative: UART flashing. XIAO C6 buttons (BOOT/RESET) aren't on pin headers, so automating the reset-into-download-mode sequence from the Pi would need fiddly SMD soldering to the button pads. HTTP OTA avoids all that.

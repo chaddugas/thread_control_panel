@@ -22,6 +22,9 @@ __pycache__/
 venv/
 .pytest_cache/
 
+# direnv cache
+.direnv/
+
 # OS / editor
 .DS_Store
 .idea/

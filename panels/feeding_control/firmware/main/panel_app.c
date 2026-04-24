@@ -11,8 +11,9 @@
 
 #include "esp_err.h"
 #include "esp_http_client.h"
-#include "esp_https_ota.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -41,6 +42,12 @@ static const char *TAG = "panel_app";
 // through because the local UI is served regardless of HA state.
 static bool s_ha_online = false;
 
+// Set to true while an OTA download is running. Periodic sensor publishes
+// are suppressed during this window so the download isn't fighting for
+// Thread bandwidth with our own chatter. UART forwards still go out — the
+// Pi needs sensor updates regardless of OTA state.
+static volatile bool s_ota_active = false;
+
 static void publish_proximity(int dist_cm, int strength)
 {
     char uart_payload[96];
@@ -50,7 +57,7 @@ static void publish_proximity(int dist_cm, int strength)
                      dist_cm, strength);
     (void)panel_uart_send_line(uart_payload, u);
 
-    if (!s_ha_online)
+    if (!s_ha_online || s_ota_active)
     {
         return;
     }
@@ -81,7 +88,7 @@ static void publish_ambient(int raw, int mv)
                      pct, raw, mv);
     (void)panel_uart_send_line(uart_payload, u);
 
-    if (!s_ha_online)
+    if (!s_ha_online || s_ota_active)
     {
         return;
     }
@@ -230,6 +237,126 @@ static void republish_current_sensor_values(void)
     }
 }
 
+// Download firmware from `url` and write into the idle OTA partition.
+// Returns ESP_OK on success (caller should reboot); any other return
+// code is a logged error and the current image stays running.
+static esp_err_t download_ota_image(const char *url)
+{
+    const esp_partition_t *update = esp_ota_get_next_update_partition(NULL);
+    if (update == NULL)
+    {
+        ESP_LOGE(TAG, "OTA: no update partition available");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "OTA: target partition '%s' @ 0x%" PRIx32 " size 0x%" PRIx32,
+             update->label, update->address, update->size);
+
+    esp_http_client_config_t http_cfg = {
+        .url = url,
+        .timeout_ms = 10000,
+        .keep_alive_enable = true,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
+    if (client == NULL)
+    {
+        ESP_LOGE(TAG, "OTA: esp_http_client_init failed");
+        return ESP_FAIL;
+    }
+
+    esp_ota_handle_t ota_handle = 0;
+    bool ota_begun = false;
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "OTA: http open failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+    int content_length = esp_http_client_fetch_headers(client);
+    if (content_length <= 0)
+    {
+        ESP_LOGE(TAG, "OTA: invalid content_length %d", content_length);
+        err = ESP_FAIL;
+        goto cleanup;
+    }
+    int status = esp_http_client_get_status_code(client);
+    if (status != 200)
+    {
+        ESP_LOGE(TAG, "OTA: server returned HTTP %d", status);
+        err = ESP_FAIL;
+        goto cleanup;
+    }
+    ESP_LOGI(TAG, "OTA: downloading %d bytes", content_length);
+
+    err = esp_ota_begin(update, content_length, &ota_handle);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "OTA: esp_ota_begin: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+    ota_begun = true;
+
+    char buf[1024];
+    int total = 0;
+    int last_log = 0;
+    while (true)
+    {
+        int n = esp_http_client_read(client, buf, sizeof(buf));
+        if (n < 0)
+        {
+            ESP_LOGE(TAG, "OTA: http read failed");
+            err = ESP_FAIL;
+            goto cleanup;
+        }
+        if (n == 0)
+        {
+            break;  // EOF
+        }
+        err = esp_ota_write(ota_handle, buf, n);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "OTA: esp_ota_write: %s", esp_err_to_name(err));
+            goto cleanup;
+        }
+        total += n;
+        if (total - last_log >= content_length / 10)
+        {
+            ESP_LOGI(TAG, "OTA: %d / %d bytes", total, content_length);
+            last_log = total;
+        }
+    }
+
+    if (total != content_length)
+    {
+        ESP_LOGE(TAG, "OTA: short read: %d / %d bytes", total, content_length);
+        err = ESP_FAIL;
+        goto cleanup;
+    }
+
+    err = esp_ota_end(ota_handle);
+    ota_begun = false;  // esp_ota_end finalizes the handle either way
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "OTA: esp_ota_end (image invalid?): %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+    err = esp_ota_set_boot_partition(update);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "OTA: set_boot_partition: %s", esp_err_to_name(err));
+    }
+
+cleanup:
+    if (ota_begun)
+    {
+        esp_ota_abort(ota_handle);
+    }
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return err;
+}
+
 // OTA download runs in its own task so it doesn't block the MQTT event
 // loop. The URL is heap-allocated by the caller and freed here.
 static void ota_task(void *arg)
@@ -237,55 +364,61 @@ static void ota_task(void *arg)
     char *url = (char *)arg;
     ESP_LOGI(TAG, "OTA: starting download from %s", url);
 
-    esp_http_client_config_t http_cfg = {
-        .url = url,
-        .timeout_ms = 10000,
-        .keep_alive_enable = true,
-    };
-    esp_https_ota_config_t ota_cfg = {
-        .http_config = &http_cfg,
-    };
-
-    esp_err_t err = esp_https_ota(&ota_cfg);
+    // Suppress our own sensor publishes while downloading so they don't
+    // compete with the HTTP stream for Thread bandwidth.
+    s_ota_active = true;
+    esp_err_t err = download_ota_image(url);
     if (err == ESP_OK)
     {
-        ESP_LOGW(TAG, "OTA: download succeeded, rebooting into new image");
+        ESP_LOGW(TAG, "OTA: success, rebooting into new image");
         // Let MQTT flush any pending publishes before the hard reset.
         vTaskDelay(pdMS_TO_TICKS(1000));
         esp_restart();
     }
     else
     {
-        ESP_LOGE(TAG, "OTA: download failed: %s — staying on current image",
+        ESP_LOGE(TAG, "OTA: failed: %s — staying on current image",
                  esp_err_to_name(err));
     }
+    s_ota_active = false;
 
     free(url);
     vTaskDelete(NULL);
 }
 
-// cmd/ota payload is `{"url":"http://..."}`. Pull the URL out via the
-// same strstr-based unwrap we use elsewhere (UI/bridge emits flat
-// objects, so this is reliable enough for V1).
+// cmd/ota payload is `{"url":"http://..."}` (or with whitespace after the
+// colon, depending on the publisher). Pull the URL out tolerantly: find
+// the "url": key, skip whitespace, expect an opening quote, read until
+// the closing quote.
 static void handle_ota_command(const char *data, int data_len)
 {
-    const char prefix[] = "\"url\":\"";
+    const char key[] = "\"url\":";
     const char *p = data;
     const char *end = data + data_len;
-    const char *url_start = NULL;
-    for (; p + sizeof(prefix) - 1 <= end; p++)
+    const char *after_key = NULL;
+    for (; p + sizeof(key) - 1 <= end; p++)
     {
-        if (memcmp(p, prefix, sizeof(prefix) - 1) == 0)
+        if (memcmp(p, key, sizeof(key) - 1) == 0)
         {
-            url_start = p + sizeof(prefix) - 1;
+            after_key = p + sizeof(key) - 1;
             break;
         }
     }
-    if (url_start == NULL)
+    if (after_key == NULL)
     {
         ESP_LOGW(TAG, "cmd/ota: no url field, dropping");
         return;
     }
+    while (after_key < end && (*after_key == ' ' || *after_key == '\t'))
+    {
+        after_key++;
+    }
+    if (after_key >= end || *after_key != '"')
+    {
+        ESP_LOGW(TAG, "cmd/ota: url value not a string, dropping");
+        return;
+    }
+    const char *url_start = after_key + 1;
     const char *url_end = memchr(url_start, '"', end - url_start);
     if (url_end == NULL)
     {

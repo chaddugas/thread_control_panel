@@ -19,6 +19,8 @@ idf_component_register(
         esp_event
         esp_netif
         vfs
+        app_update
+        esp_partition
     EMBED_TXTFILES
         "certs/ca_cert.pem"
 )
