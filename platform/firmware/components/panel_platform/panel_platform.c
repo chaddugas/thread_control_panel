@@ -16,10 +16,6 @@
 #include "ot_led_strip.h"
 #endif
 
-#if CONFIG_OPENTHREAD_CLI_ESP_EXTENSION
-#include "esp_ot_cli_extension.h"
-#endif
-
 void panel_platform_init(void)
 {
     // Used eventfds: netif, ot task queue, radio driver
@@ -48,9 +44,6 @@ void panel_platform_init(void)
 
     ESP_ERROR_CHECK(esp_openthread_start(&config));
 
-#if CONFIG_OPENTHREAD_CLI_ESP_EXTENSION
-    esp_cli_custom_command_init();
-#endif
 #if CONFIG_OPENTHREAD_STATE_INDICATOR_ENABLE
     ESP_ERROR_CHECK(esp_openthread_state_indicator_init(esp_openthread_get_instance()));
 #endif

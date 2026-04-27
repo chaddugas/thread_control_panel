@@ -23,6 +23,11 @@ TOPIC_PANEL_SET = "thread_panel/{panel_id}/set/{name}"
 TOPIC_PANEL_STATE = "thread_panel/{panel_id}/state/{name}"
 TOPIC_PANEL_CMD = "thread_panel/{panel_id}/cmd/{name}"
 
+# Per-panel cross-entity registry under hass.data[DOMAIN]. The select +
+# text entities for wifi management register their entity_ids here so
+# the connect button can read their current state at press time.
+DATA_ENTITIES = "entities"
+
 PAYLOAD_ONLINE = "online"
 PAYLOAD_OFFLINE = "offline"
 

@@ -1,7 +1,11 @@
 ## Platform component dependencies — shared across every thread_panel product.
+##
+## esp_ot_cli_extension intentionally omitted: it registers commands against
+## OpenThread's CLI layer (via otCliSetUserCommands) but we don't expose a CLI
+## on this device. Keeping CONFIG_OPENTHREAD_CLI=n drops ~30 KB of CLI code
+## from the OT library and lets us run the console in non-blocking secondary
+## mode (see sdkconfig.defaults "Console" block).
 dependencies:
-  espressif/esp_ot_cli_extension:
-    version: ~2.0.0
   idf:
     version: '>=4.1.0'
   ot_led:

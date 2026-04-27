@@ -1,4 +1,21 @@
 #
+# Console
+#
+# USB-Serial-JTAG as the *primary* console blocks on TX when no USB host is
+# draining the CDC endpoint. Symptom: when the C6 is powered from a dumb 5 V
+# source (USB-C PD brick, Pi header's 5V pin) instead of a laptop, the chip
+# boots but OT/MQTT never attach — log writes stall and drag Thread bring-up
+# with them. Laptop works because the host enumerates USJ and drains the FIFO.
+#
+# Fix: route USJ through the *secondary* console slot, which uses a non-
+# blocking TX path (drops bytes after 50 ms if no host is reading). Primary
+# is NONE because both hardware UARTs are already claimed (UART0 = LiDAR,
+# UART1 = Pi bridge) and we don't use console input in firmware anyway.
+CONFIG_ESP_CONSOLE_NONE=y
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
+# end of Console
+
+#
 # Serial Flasher Config
 #
 # The XIAO ESP32-C6 has 4 MB of flash; ESP-IDF's default for esp32c6 is
@@ -48,6 +65,13 @@ CONFIG_OPENTHREAD_BORDER_ROUTER=n
 CONFIG_OPENTHREAD_DNS64_CLIENT=y
 CONFIG_OPENTHREAD_TASK_SIZE=10240
 CONFIG_OPENTHREAD_CONSOLE_ENABLE=n
+# No CLI — this is a headless MTD. Disabling drops ~30 KB of CLI code from
+# the OT library and, crucially, avoids a compile error in ot_console.c which
+# #error's when the primary console is NONE (which ours is — see Console block
+# above). We also removed the esp_ot_cli_extension dependency from
+# platform/firmware/components/panel_platform/idf_component.yml because its
+# symbols are gone once CLI is off.
+CONFIG_OPENTHREAD_CLI=n
 # Device type: MTD (Minimal Thread Device / child). The C6 is a mains-
 # powered leaf — it doesn't need to route for anyone. FTD (the ESP-IDF
 # default) causes the C6 to promote to router and maintain links to every

@@ -22,7 +22,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from . import reboot, screen, wifi
+from . import reboot, screen, wifi, wifi_manage
 
 log = logging.getLogger(__name__)
 
@@ -41,7 +41,16 @@ SET_HANDLERS: dict[str, tuple[ApplyFn, EmitFn | None]] = {
 
 CMD_HANDLERS: dict[str, ApplyFn] = {
     "reboot_pi": reboot.apply_reboot_pi,
+    "wifi_connect": wifi_manage.apply_wifi_connect,
+    "wifi_scan": wifi_manage.apply_wifi_scan,
 }
+
+# Modules that need a one-shot kick at startup but don't fit the
+# (set/state) pairing — typically because they own command-only topics
+# plus a periodic background task.
+EXTRA_EMITTERS: list[EmitFn] = [
+    wifi_manage.emit_initial,
+]
 
 
 async def dispatch_set(bridge, name: str, payload: dict) -> None:
@@ -77,3 +86,8 @@ async def emit_all_initial(bridge) -> None:
             await emit(bridge)
         except Exception:
             log.exception("emit_initial for %s failed", name)
+    for emit in EXTRA_EMITTERS:
+        try:
+            await emit(bridge)
+        except Exception:
+            log.exception("emit_initial for %s failed", emit.__name__)

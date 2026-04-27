@@ -1,3 +1,10 @@
 {
-  "idf.currentSetup": "/Users/chaddugas/.espressif/v6.0/esp-idf"
+  "idf.currentSetup": "/Users/chaddugas/.espressif/v6.0/esp-idf",
+  "python-envs.pythonProjects": [
+    {
+      "path": ".",
+      "envManager": "ms-python.python:venv",
+      "packageManager": "ms-python.python:pip"
+    }
+  ]
 }

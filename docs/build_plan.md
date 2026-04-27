@@ -139,10 +139,11 @@ Discovery configs published by the C6 at boot to `homeassistant/.../thread_panel
 | `thread_panel/<id>/ha_availability` | Integration LWT | yes | `online` / `offline` (integration is loaded and ready; flips `online` only after roster + initial state are published) |
 | `thread_panel/<id>/state/wifi_enabled` | Pi → C6 → MQTT | yes | `{"value": true}` |
 | `thread_panel/<id>/set/wifi_enabled` | HA → C6 → Pi | no | `{"value": true}` |
-| `thread_panel/<id>/state/wifi_ssid` | Pi → C6 → MQTT | yes | `{"value": "..."}` |
-| `thread_panel/<id>/set/wifi_ssid` | HA → C6 → Pi | no | `{"value": "..."}` |
-| `thread_panel/<id>/state/wifi_ssids` | Pi → C6 → MQTT | yes | `{"value": ["...", "..."]}` (scan result) |
-| `thread_panel/<id>/set/wifi_password` | HA → C6 → Pi | no | `{"value": "..."}` (write-only, never echoed) |
+| `thread_panel/<id>/state/wifi_ssid` | Pi → C6 → MQTT | yes | `{"value": "..."}` (currently connected SSID; `""` when disconnected) |
+| `thread_panel/<id>/state/wifi_ssids` | Pi → C6 → MQTT | yes | `{"value": [{"ssid": "...", "security": "wpa-psk"\|"sae"\|"none"\|null, "in_use": bool}, ...]}` |
+| `thread_panel/<id>/state/wifi_error` | Pi → C6 → MQTT | yes | `{"value": "..."}` (last connect-attempt error; `""` on success) |
+| `thread_panel/<id>/cmd/wifi_connect` | HA → C6 → Pi | no | `{"ssid": "...", "password": "...", "security": "wpa-psk"\|"sae"\|"none"\|null}` |
+| `thread_panel/<id>/cmd/wifi_scan` | HA → C6 → Pi | no | `{}` (force immediate rescan + republish) |
 | `thread_panel/<id>/state/brightness` | Pi → C6 → MQTT | yes | `{"value": 0..100}` |
 | `thread_panel/<id>/set/brightness` | HA → C6 → Pi | no | `{"value": 50}` |
 | `thread_panel/<id>/state/screen_on` | Pi → C6 → MQTT | yes | `{"value": true}` |
@@ -259,7 +260,8 @@ Either side can ignore messages it doesn't understand. Both sides log everything
 - Device role: MTD (Minimal Thread Device / child) — picks one parent, avoids the neighbor-maintenance obligations that were destabilizing the mesh under load when the C6 was an FTD router.
 
 **Key sdkconfig flags (important — don't lose):**
-- `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y` — for input to work over USB
+- `CONFIG_ESP_CONSOLE_NONE=y` + `CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y` — USJ on the *secondary* (non-blocking) console slot, primary is none. Do **not** put USJ on the primary slot: primary TX is blocking, and when the C6 is powered from a dumb 5 V source (PD brick, Pi 5V header) with no USB host draining the CDC endpoint, log writes stall and drag OT/MQTT attach with them. Laptop hides this because the host drains the buffer. Both hardware UARTs are already claimed (UART0 = LiDAR, UART1 = Pi bridge), and the firmware doesn't use console input anywhere, so there's no reason to keep USJ as primary.
+- `CONFIG_OPENTHREAD_CLI=n` — no CLI on this device. Required alongside `ESP_CONSOLE_NONE` because the `ot_examples_common` component's `ot_console.c` hard-errors at compile time when there's no primary console, and it's only compiled when `OPENTHREAD_CLI=y`. Disabling CLI also removes `otCliSetUserCommands` from the OT library, so we dropped the `esp_ot_cli_extension` managed-component dep in `platform/firmware/components/panel_platform/idf_component.yml` — the extension references those symbols unconditionally.
 - `CONFIG_OPENTHREAD_NETWORK_AUTO_START=y` — brings up Thread on boot
 - `CONFIG_OPENTHREAD_DNS_CLIENT=y` — enables OpenThread's DNS client (we override the discovered server but the infrastructure has to be present)
 - `CONFIG_LWIP_USE_ESP_GETADDRINFO=y` — required; default resolver fails on IPv6-only networks
@@ -400,15 +402,27 @@ esp_mqtt_client_config_t mqtt_cfg = {
     - Bridge: `panel_bridge/controls/` — one module per control (`screen.py`, `wifi.py`, `reboot.py`) + a dispatch registry. Each handler executes the system action (`vcgencmd`, `nmcli`, `sudo shutdown`) and emits `panel_state` back. Initial state is published at bridge startup so HA sees fresh values.
     - Integration: `switch.py` (screen_on, wifi_enabled) and `button.py` (reboot_pi, reboot_c6). Shared `entity.py` module hosts the device-info + availability subscription that all three platforms share.
 
-    Sudoers note — reboot_pi requires a passwordless sudo entry. On the Pi, run `sudo visudo -f /etc/sudoers.d/panel-bridge` and add:
+    Sudoers note — reboot_pi + screen + wifi controls all need passwordless sudo. On the Pi, run `sudo visudo -f /etc/sudoers.d/panel-bridge` and add:
 
     ```
     chaddugas ALL=(root) NOPASSWD: /sbin/shutdown -r now
+    chaddugas ALL=(root) NOPASSWD: /usr/bin/nmcli *
+    chaddugas ALL=(root) NOPASSWD: /usr/bin/tee /sys/class/graphics/fb0/blank
     ```
+
+    The broad `nmcli *` rule (vs. earlier narrow `nmcli radio wifi *`) is required by the wifi-credential-management work landed 2026-04-27 — see below.
+
+    Wi-Fi credential management landed 2026-04-27:
+    - **Motivation**: pet-feeder Pi lost its only NetworkManager connection profile (cause unconfirmed; bridge code only ever toggled the radio, never deleted profiles), leaving the device with no way back online except HDMI + USB keyboard on the tiny 6.25" display. Recovery was painful enough to justify building a HA-side recovery path.
+    - Bridge: `controls/wifi_manage.py` — periodic 30 s scan via `nmcli -t -f IN-USE,SSID,SECURITY device wifi list --rescan no`, immediate scan via `cmd/wifi_scan`, profile add+activate via `cmd/wifi_connect`. Auto-detects `wpa-psk`/`sae`/`none` from the scan's SECURITY field; SAE adds `wifi-sec.pmf 3` since some kernels reject SAE without explicit PMF. Existing profile with the same name is deleted before re-add so credentials are always fresh.
+    - Firmware: `panel_app.c` now subscribes to `cmd/wifi_connect` + `cmd/wifi_scan` and forwards both as `panel_cmd` envelopes over UART. The forwarding logic was generalized into a `forward_panel_cmd(name, data, ...)` helper (replacing the inline reboot_pi shape) so command payloads with data splice cleanly.
+    - Integration: `select.py` (`PanelWifiNetworkSelect`) populated from retained `state/wifi_ssids`, with security info per SSID stashed in extra_state_attributes. `text.py` (`PanelWifiPasswordText`, mode=PASSWORD). `sensor.py` adds `PanelWifiSsidSensor` (current SSID) + `PanelWifiErrorSensor` (last connect error). `button.py` adds `PanelWifiScanButton` (one-shot rescan) and `PanelWifiConnectButton` (assembles `{ssid, password, security}` from the select+text and publishes to `cmd/wifi_connect`, then optimistically clears the password via `text.set_value`).
+    - The select+text+button trio coordinates via a per-panel entity-id registry under `hass.data[DOMAIN]["entities"][panel_id]`, populated in each entity's `async_added_to_hass`. Avoids fragile entity_id slug guessing.
 
     Deferred:
     - **Brightness (NumberEntity)**: the Waveshare 6.25" HDMI display doesn't expose a `/sys/class/backlight/*` interface. Revisit when either (a) the hardware is swapped for something with a controllable backlight, or (b) we ship the kiosk compositor and can do a Wayland gamma-overlay software dim.
-    - **wifi_ssid / wifi_password / wifi_ssids (TextEntity + select)**: full credential management. Wire up when there's a real UX need; for now, nmcli on the Pi directly is sufficient.
+    - **Hidden SSIDs** in the network select: V1 only lists broadcast networks. Hidden SSIDs come back as empty strings in `nmcli -t` output and are filtered out. Add an "Other..." option that lets the user type an SSID into the password text alongside the password (or a second text entity) when there's a real need.
+    - **Enterprise (802.1X) networks**: scan classifies them but the connect path rejects them (no key-mgmt mapping). Add when someone needs it.
 
 13. ~~**OTA firmware updates over Thread**~~ ✅ DONE 2026-04-23
     - Motivation: the XIAO ESP32-C6 can't use USB and the 5V rail simultaneously. In the enclosure we can't easily pull the power-select pin, so USB flashing becomes impractical. Need a way to push new firmware without touching the board.
@@ -442,6 +456,7 @@ esp_mqtt_client_config_t mqtt_cfg = {
 
 ### Resolved
 
+- ~~USB-Serial-JTAG as primary console deadlocked Thread attach on non-host power~~ — fixed 2026-04-24. C6 appeared dead (lights on, no Thread) when powered from a PD wall-wart or the Pi's 5V header, but attached fine via laptop USB. Cause: `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y` puts USJ on the *primary* console slot, whose TX path blocks when the CDC endpoint has no host draining it. Log writes during OT/MQTT bring-up filled the tiny FIFO and stalled the logging tasks. Fix: moved USJ to the *secondary* slot (`CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y`) whose TX path is non-blocking (drops bytes after 50 ms if no host reads), and set primary to NONE. No loss of functionality — firmware doesn't use console input, and both hardware UARTs were already claimed anyway.
 - ~~panel-bridge.sh aborts on no-network pip install~~ — fixed 2026-04-24. `pip install -e` failure now logs a warning and continues with stale deps; marker isn't touched so next boot retries. Survives WiFi-off production boots where `pyproject.toml` may look newer-than-marker.
 - ~~TLS hostname verification disabled~~ — fixed by switching to ISRG Root X1 as embedded CA + duckdns hostname in URI + AdGuard rewrite for resolution.
 - ~~Hardcoded HA IPv6 fragility (regenerated on reboot)~~ — fixed by pinning static ULA `fd00:9db1:1410:d98c::10` on HA via `ha network update`. URI now uses hostname, not IP literal.

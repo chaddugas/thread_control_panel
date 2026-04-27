@@ -26,6 +26,7 @@ from .const import (
     CONF_PANEL_ID,
     TOPIC_PANEL_AMBIENT_BRIGHTNESS,
     TOPIC_PANEL_PROXIMITY,
+    TOPIC_PANEL_STATE,
 )
 from .entity import PanelEntityBase
 
@@ -108,6 +109,56 @@ class PanelAmbientBrightnessSensor(_PanelSensorBase):
         self._attr_extra_state_attributes = attrs
 
 
+class PanelWifiSsidSensor(_PanelSensorBase):
+    """Currently connected SSID; empty string when disconnected."""
+
+    _attr_name = "Connected Wi-Fi"
+    _attr_icon = "mdi:wifi-check"
+    _state_topic_template = TOPIC_PANEL_STATE
+
+    def __init__(self, panel_id: str) -> None:
+        super().__init__(panel_id)
+        self._attr_unique_id = f"thread_panel_{panel_id}_wifi_ssid"
+
+    async def async_added_to_hass(self) -> None:
+        # Override the base's template-format step because the panel-state
+        # topic is parameterized by both panel_id and name.
+        await PanelEntityBase.async_added_to_hass(self)
+        topic = TOPIC_PANEL_STATE.format(panel_id=self._panel_id, name="wifi_ssid")
+        self._unsubs.append(
+            await mqtt.async_subscribe(self.hass, topic, self._on_state_message)
+        )
+
+    def _apply_state(self, data: dict[str, Any]) -> None:
+        value = data.get("value")
+        # Show None (→ "unknown" in HA) when disconnected, so the entity
+        # state visually distinguishes "no wifi" from a literally-empty SSID.
+        self._attr_native_value = value if value else None
+
+
+class PanelWifiErrorSensor(_PanelSensorBase):
+    """Last connect-attempt error; empty string when last attempt succeeded."""
+
+    _attr_name = "Wi-Fi Error"
+    _attr_icon = "mdi:wifi-alert"
+    _state_topic_template = TOPIC_PANEL_STATE
+
+    def __init__(self, panel_id: str) -> None:
+        super().__init__(panel_id)
+        self._attr_unique_id = f"thread_panel_{panel_id}_wifi_error"
+
+    async def async_added_to_hass(self) -> None:
+        await PanelEntityBase.async_added_to_hass(self)
+        topic = TOPIC_PANEL_STATE.format(panel_id=self._panel_id, name="wifi_error")
+        self._unsubs.append(
+            await mqtt.async_subscribe(self.hass, topic, self._on_state_message)
+        )
+
+    def _apply_state(self, data: dict[str, Any]) -> None:
+        value = data.get("value")
+        self._attr_native_value = value if value else None
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -115,5 +166,10 @@ async def async_setup_entry(
 ) -> None:
     panel_id: str = entry.data[CONF_PANEL_ID]
     async_add_entities(
-        [PanelProximitySensor(panel_id), PanelAmbientBrightnessSensor(panel_id)]
+        [
+            PanelProximitySensor(panel_id),
+            PanelAmbientBrightnessSensor(panel_id),
+            PanelWifiSsidSensor(panel_id),
+            PanelWifiErrorSensor(panel_id),
+        ]
     )

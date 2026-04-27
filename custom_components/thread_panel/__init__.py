@@ -17,7 +17,13 @@ _LOGGER = logging.getLogger(__name__)
 # Platforms hosting the panel-itself entities (sensors, future switches/etc.).
 # The generic entity forwarder is not a platform — it runs directly in
 # async_setup_entry and publishes to MQTT topics the C6 subscribes to.
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SWITCH, Platform.BUTTON]
+PLATFORMS: list[Platform] = [
+    Platform.SENSOR,
+    Platform.SWITCH,
+    Platform.BUTTON,
+    Platform.SELECT,
+    Platform.TEXT,
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

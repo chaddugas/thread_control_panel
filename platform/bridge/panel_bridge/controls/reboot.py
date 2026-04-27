@@ -5,10 +5,16 @@ for specific commands. Add to /etc/sudoers.d/panel-bridge via
 `sudo visudo -f /etc/sudoers.d/panel-bridge`:
 
     chaddugas ALL=(root) NOPASSWD: /sbin/shutdown -r now
-    chaddugas ALL=(root) NOPASSWD: /usr/bin/nmcli radio wifi *
+    chaddugas ALL=(root) NOPASSWD: /usr/bin/nmcli *
     chaddugas ALL=(root) NOPASSWD: /usr/bin/tee /sys/class/graphics/fb0/blank
 
 (Replace `chaddugas` with your bridge user if different.)
+
+The broad `nmcli *` rule is needed because wifi_manage.py adds and
+activates connection profiles in addition to the radio toggle in
+wifi.py. Narrowing it to specific subcommands is doable but not a
+meaningful security boundary — anything that can write fb0/blank or
+reboot the Pi can already disrupt connectivity.
 
 Without these, the buttons quietly log "sudo failed — is passwordless
 sudo configured?" and nothing happens. No state to report for reboot

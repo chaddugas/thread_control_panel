@@ -517,6 +517,15 @@ void panel_app_on_connected(esp_mqtt_client_handle_t client)
     msg_id = esp_mqtt_client_subscribe(client, PANEL_TOPIC_CMD_OTA, 0);
     ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d",
              PANEL_TOPIC_CMD_OTA, msg_id);
+
+    // Wi-Fi management — forwarded to Pi as panel_cmd envelopes.
+    msg_id = esp_mqtt_client_subscribe(client, PANEL_TOPIC_CMD_WIFI_CONNECT, 0);
+    ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d",
+             PANEL_TOPIC_CMD_WIFI_CONNECT, msg_id);
+
+    msg_id = esp_mqtt_client_subscribe(client, PANEL_TOPIC_CMD_WIFI_SCAN, 0);
+    ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d",
+             PANEL_TOPIC_CMD_WIFI_SCAN, msg_id);
 }
 
 // Buffer size for the wrapped UART line we forward to the Pi. Must be big
@@ -598,6 +607,41 @@ static void forward_panel_set(const char *name, int name_len,
     (void)panel_uart_send_line(buf, n);
 }
 
+// Panel-itself cmd/<name>: wrap with a panel_cmd envelope and forward over
+// UART. Empty/missing payload (the typical "{}" reboot case) sends a bare
+// envelope; payloads with fields (wifi_connect: ssid+password) get spliced
+// in alongside the name. Either way the bridge's dispatch_cmd routes by
+// name to the right control handler.
+static void forward_panel_cmd(const char *name, int name_len,
+                              const char *data, int data_len)
+{
+    char buf[FORWARD_BUF_SIZE];
+    int n;
+
+    bool has_payload = (data_len > 2 &&
+                        data[0] == '{' &&
+                        data[data_len - 1] == '}');
+    if (has_payload)
+    {
+        n = snprintf(buf, sizeof(buf),
+                     "{\"type\":\"panel_cmd\",\"name\":\"%.*s\",%.*s}",
+                     name_len, name,
+                     data_len - 2, data + 1);
+    }
+    else
+    {
+        n = snprintf(buf, sizeof(buf),
+                     "{\"type\":\"panel_cmd\",\"name\":\"%.*s\"}",
+                     name_len, name);
+    }
+    if (n <= 0 || n >= (int)sizeof(buf))
+    {
+        ESP_LOGW(TAG, "panel_cmd envelope overflow (%d bytes), dropping", n);
+        return;
+    }
+    (void)panel_uart_send_line(buf, n);
+}
+
 void panel_app_on_data(esp_mqtt_client_handle_t client,
                        const char *topic, int topic_len,
                        const char *data, int data_len)
@@ -667,10 +711,8 @@ void panel_app_on_data(esp_mqtt_client_handle_t client,
         memcmp(topic, PANEL_TOPIC_CMD_REBOOT_PI, reboot_pi_topic_len) == 0)
     {
         ESP_LOGI(TAG, "panel_cmd reboot_pi");
-        char buf[64];
-        int n = snprintf(buf, sizeof(buf),
-                         "{\"type\":\"panel_cmd\",\"name\":\"reboot_pi\"}");
-        (void)panel_uart_send_line(buf, n);
+        forward_panel_cmd("reboot_pi", (int)strlen("reboot_pi"),
+                          data, data_len);
         return;
     }
 
@@ -681,6 +723,29 @@ void panel_app_on_data(esp_mqtt_client_handle_t client,
     {
         ESP_LOGW(TAG, "cmd/ota received: %.*s", data_len, data);
         handle_ota_command(data, data_len);
+        return;
+    }
+
+    // cmd/wifi_connect: forward to Pi as panel_cmd with ssid+password+security.
+    const size_t wifi_connect_topic_len = strlen(PANEL_TOPIC_CMD_WIFI_CONNECT);
+    if ((size_t)topic_len == wifi_connect_topic_len &&
+        memcmp(topic, PANEL_TOPIC_CMD_WIFI_CONNECT, wifi_connect_topic_len) == 0)
+    {
+        // Don't log the payload — it carries the cleartext password.
+        ESP_LOGI(TAG, "panel_cmd wifi_connect (%d byte payload)", data_len);
+        forward_panel_cmd("wifi_connect", (int)strlen("wifi_connect"),
+                          data, data_len);
+        return;
+    }
+
+    // cmd/wifi_scan: trigger an immediate rescan + republish on the Pi.
+    const size_t wifi_scan_topic_len = strlen(PANEL_TOPIC_CMD_WIFI_SCAN);
+    if ((size_t)topic_len == wifi_scan_topic_len &&
+        memcmp(topic, PANEL_TOPIC_CMD_WIFI_SCAN, wifi_scan_topic_len) == 0)
+    {
+        ESP_LOGI(TAG, "panel_cmd wifi_scan");
+        forward_panel_cmd("wifi_scan", (int)strlen("wifi_scan"),
+                          data, data_len);
         return;
     }
 

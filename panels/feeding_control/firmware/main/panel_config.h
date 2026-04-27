@@ -52,3 +52,10 @@
 // esp_https_ota into the idle OTA partition, flips the boot partition,
 // and reboots; ESP-IDF's rollback reverts if the new image misbehaves.
 #define PANEL_TOPIC_CMD_OTA                "thread_panel/" PANEL_ID "/cmd/ota"
+
+// Wi-Fi management commands. Forwarded to the Pi over UART as panel_cmd
+// envelopes for the bridge's wifi_manage module to dispatch. Subscribed
+// explicitly (rather than via cmd/#) for the same reason as reboot_pi —
+// avoid receiving our own cmd/call_service publishes back as echoes.
+#define PANEL_TOPIC_CMD_WIFI_CONNECT       "thread_panel/" PANEL_ID "/cmd/wifi_connect"
+#define PANEL_TOPIC_CMD_WIFI_SCAN          "thread_panel/" PANEL_ID "/cmd/wifi_scan"
