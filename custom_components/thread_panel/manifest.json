@@ -1,7 +1,7 @@
 {
   "domain": "thread_panel",
   "name": "Thread Panel",
-  "version": "0.2.7",
+  "version": "0.3.0",
   "documentation": "https://github.com/chaddugas/thread_control_panel",
   "issue_tracker": "https://github.com/chaddugas/thread_control_panel/issues",
   "codeowners": [
