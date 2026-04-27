@@ -22,8 +22,21 @@ if [ ! -d "$BRIDGE_DIR/.venv" ]; then
 fi
 
 echo "→ Pulling latest..."
-if ! git -C "$REPO_DIR" pull --ff-only; then
-    echo "panel-bridge: git pull failed — continuing with current checkout" >&2
+# network-online.target on NetworkManager can fire before DNS is actually
+# usable, so a fresh boot's first `git pull` often hits "Could not resolve
+# hostname github.com". Retry a few times with short sleeps before giving
+# up — by then either DNS is up or the network really is unavailable.
+PULL_OK=0
+for attempt in 1 2 3 4 5; do
+    if git -C "$REPO_DIR" pull --ff-only; then
+        PULL_OK=1
+        break
+    fi
+    echo "panel-bridge: git pull attempt $attempt failed, retrying in 5s..." >&2
+    sleep 5
+done
+if [ "$PULL_OK" -eq 0 ]; then
+    echo "panel-bridge: git pull failed after retries — continuing with current checkout" >&2
 fi
 
 if [ ! -f "$MARKER" ] || [ "$BRIDGE_DIR/pyproject.toml" -nt "$MARKER" ]; then
