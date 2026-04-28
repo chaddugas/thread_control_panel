@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Pi-side bootstrap for thread_control_panel kiosk. Idempotent — re-run
-# after pulling unit-file updates and it'll just re-symlink and reload.
+# after pulling unit-file updates and it'll re-render and reload.
 #
 # Assumes you've already:
 #   - Cloned the repo to ~/thread_control_panel
@@ -9,10 +9,17 @@
 #       cd ~/thread_control_panel/platform/bridge
 #       python3 -m venv .venv
 #       .venv/bin/pip install -e .
-#   - apt-installed cog (the WPE WebKit kiosk launcher)
+#   - apt-installed the kiosk stack:
+#       sudo apt install -y cage cog
 #
 # Run as the user that'll run the kiosk (NOT as root) — sudo is invoked
 # only where it's actually needed.
+#
+# Templating: tracked unit files use `User=pi` and `/home/pi/...` as
+# placeholders. We render substituted copies into /etc/systemd/system/
+# rather than seding the tracked files in place — that way the working
+# tree stays clean and `git pull` doesn't keep refusing because of local
+# changes.
 
 set -e
 
@@ -28,21 +35,6 @@ if [ "$USER_NAME" = "root" ]; then
     exit 1
 fi
 
-# Each .service file is committed with `User=pi` + `/home/pi/...` paths as
-# placeholders. If we're a different user, sed them in place once. The pull
-# script tolerates the dirty working tree (it warns and continues), and a
-# subsequent fresh pull on a unit-file change re-templates here.
-if [ "$USER_NAME" != "pi" ]; then
-    echo "→ Templating unit files for user '$USER_NAME'..."
-    for unit in "${UNITS[@]}"; do
-        sed -i.bak \
-            -e "s|/home/pi/|/home/$USER_NAME/|g" \
-            -e "s|^User=pi$|User=$USER_NAME|" \
-            "$DEPLOY_DIR/$unit"
-        rm -f "$DEPLOY_DIR/$unit.bak"
-    done
-fi
-
 echo "→ Tearing down legacy units (if any)..."
 for unit in "${LEGACY_UNITS[@]}"; do
     target="/etc/systemd/system/$unit"
@@ -54,16 +46,27 @@ for unit in "${LEGACY_UNITS[@]}"; do
     fi
 done
 
-echo "→ Adding $USER_NAME to graphics/input groups (cog needs DRI + evdev)..."
+echo "→ Adding $USER_NAME to graphics/input groups (cage needs DRI + evdev)..."
 sudo usermod -aG video,input,render "$USER_NAME"
 
-echo "→ Disabling getty on tty1 so cog can own it..."
+echo "→ Disabling getty on tty1 so cage can own it..."
 sudo systemctl disable getty@tty1.service 2>/dev/null || true
 sudo systemctl stop getty@tty1.service 2>/dev/null || true
 
-echo "→ Symlinking systemd units..."
+echo "→ Rendering systemd units into /etc/systemd/system/..."
 for unit in "${UNITS[@]}"; do
-    sudo ln -sf "$DEPLOY_DIR/$unit" "/etc/systemd/system/$unit"
+    target="/etc/systemd/system/$unit"
+    # An earlier version of this script symlinked the source file. Replace
+    # any such symlink with a rendered copy.
+    if [ -L "$target" ]; then
+        sudo rm "$target"
+    fi
+    sed \
+        -e "s|/home/pi/|/home/$USER_NAME/|g" \
+        -e "s|^User=pi$|User=$USER_NAME|" \
+        "$DEPLOY_DIR/$unit" \
+        | sudo tee "$target" > /dev/null
+    sudo chmod 0644 "$target"
 done
 
 echo "→ Reloading systemd..."
@@ -80,7 +83,7 @@ cat <<EOF
 Done.
 
 Reboot now so:
-  - cog takes over tty1 and the kiosk launches automatically
+  - cage takes over tty1 and the kiosk launches automatically
   - $USER_NAME's new group memberships apply
 
 After reboot, verify with:
