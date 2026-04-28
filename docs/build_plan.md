@@ -448,9 +448,22 @@ esp_mqtt_client_config_t mqtt_cfg = {
     - P1S print
     - Cable management
 
-16. **Kiosk deployment**
-    - ✅ Bridge systemd unit already landed at `platform/deploy/panel-bridge.service` (2026-04-23) — the bridge auto-starts on boot, pulls latest on each start, and restarts on failure.
-    - Remaining: `cage` + Chromium install on the Pi; a `cage.service` unit that launches Chromium in kiosk mode pointing at the UI; a deploy path for the UI `dist/` bundle (rsync from Mac, or a build step inside the deploy script).
+16. **Kiosk deployment** (in progress 2026-04-28)
+    - ✅ Bridge systemd unit landed at `platform/deploy/panel-bridge.service` (2026-04-23) — the bridge auto-starts on boot, pulls latest on each start, and restarts on failure.
+    - ✅ UI deploy path settled (2026-04-27): build via `yarn build` inside `cut-release`, commit `dist/` to git, Pi pulls dist/ on each `panel-bridge.service` restart. Releases are the deploy unit; UI source pushes between releases don't update what the kiosk serves until the next `cut-release`.
+    - ✅ `panel-ui.service` (2026-04-27) — `python3 -m http.server` serving `panels/feeding_control/ui/dist/` on `127.0.0.1:8080`.
+    - ✅ `install-pi.sh` (2026-04-27) — idempotent: templates units for non-`pi` users, adds the user to `video,input,render`, disables `getty@tty1`, symlinks units, restarts bridge + UI server.
+    - ✅ Kiosk renderer pivot from Chromium to cog (2026-04-28). First attempt used cage + Chromium kiosk, but Chromium OOM-loops on the Pi Zero 2 W's 512 MB RAM (the boot loop visible on tty1 was systemd restarting cage every 2 s after Chromium got reaped). Switched to [`cog`](https://github.com/Igalia/cog), the WPE WebKit single-app launcher: ~100-150 MB resident, renders straight to DRM (no compositor), supports modern Vue 3 / WebSocket / variable fonts. cage dropped from the stack entirely. `cog.service` replaces `cage.service`; `install-pi.sh` cleans up the legacy cage symlink on re-run.
+
+## V2 / Post-V1 follow-ups
+
+Not blocking V1 ship, but called out so we don't lose them.
+
+- **`install-pi.sh` full bootstrap from a fresh Pi OS Lite.** Currently the script assumes the user has already cloned the repo, set up the bridge venv, and apt-installed cog. Fold all of that in so a brand-new Pi can be brought up with one command. While we're there, fold in the steps from earlier build phases that still live as prose in this doc: `dtoverlay=disable-bt` for PL011 on GPIO 14/15 (step 4), serial-console disable, NetworkManager bring-up, and any other one-time setup. End state: image SD → boot → ssh in → run script → reboot → kiosk runs.
+- **Kiosk-renderer choice via flag.** `install-pi.sh --cog` (Pi Zero 2 W, 512 MB) vs `install-pi.sh --cage` (Pi 4+, 1 GB+) so the same script works across hardware. Default to cog on detected ≤768 MB, cage on more. Either path apt-installs the right packages and symlinks the matching unit.
+- **"Unconfigured panel" splash in `platform/ui-core`.** When a panel boots without a product UI configured (`panel-ui.service` serving an empty/missing `dist/`, or no panel selected), show a friendly splash with setup instructions instead of a directory listing or blank screen. The splash itself ships as part of ui-core so every panel inherits it for free.
+- **Device → product binding.** Currently `panel-ui.service` and `cog.service` hard-code `panels/feeding_control/ui/dist/`. To support a fleet running different products (feeding_control on one Pi, something else on another), the device needs a way to declare which product it runs. Likely shape: a single config file (e.g. `/etc/thread_panel/device.conf` or a checked-in `device/<hostname>.conf`) that names the product; the systemd units read from it via `EnvironmentFile=`. Couples cleanly with the unconfigured-splash item — when no binding is set, the splash takes over.
+- **Repo reorg to support the above.** Likely lifts more of the kiosk shell (Vue app entry, theme system, splash, presence) into `platform/ui-core/` so panels only carry product-specific surfaces, and introduces a top-level concept (folder or config layer) for "which device runs which product." Tackle this together with the items above — they're all the same shape.
 
 ## Technical Debt
 

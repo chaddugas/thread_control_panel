@@ -1,0 +1,33 @@
+[Unit]
+Description=Cog kiosk — WPE WebKit single-app browser on DRM
+Documentation=https://github.com/chaddugas/thread_control_panel
+After=panel-ui.service systemd-user-sessions.service
+Requires=panel-ui.service
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+Type=simple
+# Replace `pi` with your Pi username if different. The user must be in the
+# video, input, and render groups (install-pi.sh handles this).
+User=pi
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+
+# Cog renders WPE WebKit straight to DRM/KMS — no compositor, no Chromium.
+# Memory footprint is ~100-150 MB resident, vs Chromium's 300+ MB which
+# OOM-loops on the Pi Zero 2 W's 512 MB. Cog is the WebKit project's own
+# embedded-kiosk launcher; touch + WebSocket + modern CSS all just work.
+ExecStart=/usr/bin/cog -P drm http://localhost:8080
+
+Restart=always
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target
