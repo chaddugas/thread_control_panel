@@ -24,6 +24,14 @@ StandardError=journal
 # Memory footprint is ~100-150 MB resident, vs Chromium's 300+ MB which
 # OOM-loops on the Pi Zero 2 W's 512 MB. Cog is the WebKit project's own
 # embedded-kiosk launcher; touch + WebSocket + modern CSS all just work.
+#
+# WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1: disables the bubblewrap-based
+# sandbox WPE uses to isolate its WebProcess. Required because Debian's
+# bubblewrap is shipped with file capabilities but not setuid, which modern
+# bwrap rejects ("Unexpected capabilities but not setuid, old file caps
+# config?"). We're a kiosk loading only our own localhost UI — the sandbox
+# protects against malicious sites we don't have, so disabling it is fine.
+Environment=WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
 ExecStart=/usr/bin/cog -P drm http://localhost:8080
 
 Restart=always
