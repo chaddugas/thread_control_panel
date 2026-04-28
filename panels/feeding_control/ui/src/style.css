@@ -1,4 +1,80 @@
-/* Minimal global reset + base. Per-component styles live in <style scoped>. */
+/* --- Dark theme (default) ------------------------------------------------- */
+:root,
+:root[data-theme="dark"] {
+  --ink-bg: #14110d;
+  --ink-bg-soft: #1a1611;
+  --surface: #1f1a13;
+  --surface-raised: #251f17;
+  --hairline: rgba(241, 234, 215, 0.07);
+  --hairline-strong: rgba(241, 234, 215, 0.14);
+
+  --cream: #f1ead7;
+  --cream-soft: #d8cdb0;
+  --cream-muted: #9b906f;
+  --cream-faint: #5e5642;
+
+  --brass: #d4a258;
+  --brass-deep: #a87b34;
+  --brass-veil: rgba(212, 162, 88, 0.14);
+  --brass-veil-strong: rgba(212, 162, 88, 0.22);
+
+  --sage: #93a791;
+  --rust: #c2664a;
+  --rust-veil: rgba(194, 102, 74, 0.16);
+  --rose: #d99a8a;
+  --rose-veil: rgba(217, 154, 138, 0.16);
+
+  --ambient-glow-1: rgba(212, 162, 88, 0.08);
+  --ambient-glow-2: rgba(147, 167, 145, 0.05);
+
+  --row-active: rgba(241, 234, 215, 0.04);
+
+  --feed-button-fg: var(--ink-bg);
+}
+
+/* --- Light theme (parchment) --------------------------------------------- */
+:root[data-theme="light"] {
+  --ink-bg: #f3e8cd;
+  --ink-bg-soft: #ecdfbf;
+  --surface: #ecdebd;
+  --surface-raised: #f3e7c8;
+  --hairline: rgba(38, 28, 14, 0.10);
+  --hairline-strong: rgba(38, 28, 14, 0.20);
+
+  --cream: #261c0e;
+  --cream-soft: #4a3a23;
+  --cream-muted: #7a6948;
+  --cream-faint: #a89578;
+
+  --brass: #8a5d18;
+  --brass-deep: #623f08;
+  --brass-veil: rgba(138, 93, 24, 0.10);
+  --brass-veil-strong: rgba(138, 93, 24, 0.18);
+
+  --sage: #5f6e57;
+  --rust: #8e3a22;
+  --rust-veil: rgba(142, 58, 34, 0.10);
+  --rose: #9a4f3c;
+  --rose-veil: rgba(154, 79, 60, 0.10);
+
+  --ambient-glow-1: rgba(138, 93, 24, 0.07);
+  --ambient-glow-2: rgba(95, 110, 87, 0.06);
+
+  --row-active: rgba(38, 28, 14, 0.05);
+
+  --feed-button-fg: #f3e8cd;
+}
+
+:root {
+  --display: "Fraunces", "Times New Roman", serif;
+  --body: "Instrument Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  --pad: clamp(0.85rem, 1.4vw, 1.4rem);
+  --theme-transition:
+    background-color 700ms ease,
+    color 700ms ease,
+    border-color 700ms ease,
+    box-shadow 700ms ease;
+}
 
 *,
 *::before,
@@ -10,18 +86,66 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: #0f0f17;
-  color: #e8e8ec;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
+  background: var(--ink-bg);
+  color: var(--cream);
+  font-family: var(--body);
+  font-size: 16px;
+  font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+  transition: var(--theme-transition);
 }
 
 body {
   min-height: 100vh;
+  background:
+    radial-gradient(circle at 18% -10%, var(--ambient-glow-1), transparent 55%),
+    radial-gradient(circle at 95% 110%, var(--ambient-glow-2), transparent 50%),
+    var(--ink-bg);
+  transition: var(--theme-transition);
 }
 
 button {
   font-family: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--hairline-strong);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.eyebrow {
+  font-family: var(--body);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--cream-muted);
+}
+
+.serif {
+  font-family: var(--display);
+  font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 1;
+}
+
+.serif-italic {
+  font-family: var(--display);
+  font-style: italic;
+  font-variation-settings: "opsz" 14, "SOFT" 50, "WONK" 1;
+}
+
+.frac {
+  font-feature-settings: "frac", "ss01";
 }

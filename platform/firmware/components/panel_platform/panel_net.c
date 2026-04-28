@@ -170,6 +170,15 @@ static void start_mqtt_client(void)
                 .retain = 1,
             },
         },
+        .buffer = {
+            // Default is 1024. Forwarded HA entity snapshots can exceed
+            // that — e.g. the PetLibro feeding schedule with N plans, or a
+            // select with many options. Anything larger arrives fragmented
+            // across multiple MQTT_EVENT_DATA callbacks, and panel_app's
+            // forwarders treat each chunk as a complete message and drop
+            // both. Bumping the input buffer keeps payloads contiguous.
+            .size = 4096,
+        },
     };
 
     s_client = esp_mqtt_client_init(&mqtt_cfg);

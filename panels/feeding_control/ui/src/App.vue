@@ -1,224 +1,142 @@
-<script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { usePanelStore } from '@thread-panel/ui-core';
-
-const panel = usePanelStore();
-
-// Refresh "X seconds ago" labels by ticking a reactive `now` every second.
-const now = ref(Date.now());
-let nowTimer: number | null = null;
-
-onMounted(() => {
-  panel.connect();
-  nowTimer = window.setInterval(() => {
-    now.value = Date.now();
-  }, 1000);
-});
-
-onUnmounted(() => {
-  panel.disconnect();
-  if (nowTimer !== null) {
-    window.clearInterval(nowTimer);
-    nowTimer = null;
-  }
-});
-
-const proximityAge = computed(() =>
-  panel.proximity
-    ? Math.max(0, Math.round((now.value - panel.proximity.receivedAt) / 1000))
-    : null,
-);
-
-const ambientAge = computed(() =>
-  panel.ambient
-    ? Math.max(0, Math.round((now.value - panel.ambient.receivedAt) / 1000))
-    : null,
-);
-
-const toggleLight = (): void => {
-  panel.callService('light.chad_s_office_desk_lamp', 'light.toggle', {});
-};
-</script>
-
 <template>
-  <main>
-    <header>
-      <h1>Pet Feeder Panel</h1>
-      <p class="subtitle">scaffold smoke test</p>
+  <div class="app">
+    <header class="header">
+      <Masthead />
+      <div class="tools">
+        <ManualFeed />
+        <button
+          class="settings"
+          type="button"
+          aria-label="Open settings"
+          @click="settingsOpen = true"
+        >
+          <span class="dot" />
+          <span class="dot" />
+          <span class="dot" />
+        </button>
+      </div>
     </header>
-
-    <button
-      @click="toggleLight"
-      :disabled="!panel.connected"
-    >
-      Toggle Light
-    </button>
-
-    <section class="card status">
-      <h2>Connection</h2>
-      <p :class="['pill', panel.connected ? 'pill-ok' : 'pill-warn']">
-        {{ panel.connected ? 'connected' : 'disconnected' }}
-      </p>
-      <p class="meta">{{ panel.wsUrl }}</p>
-      <p
-        v-if="panel.lastError"
-        class="error"
-      >
-        {{ panel.lastError }}
-      </p>
-    </section>
-
-    <section class="card">
-      <h2>Proximity</h2>
-      <template v-if="panel.proximity">
-        <p class="value">
-          {{ panel.proximity.value }}<span class="unit">cm</span>
-        </p>
-        <p class="meta">
-          strength {{ panel.proximity.strength }} · {{ proximityAge }}s ago
-        </p>
-      </template>
-      <p
-        v-else
-        class="placeholder"
-      >
-        awaiting first reading…
-      </p>
-    </section>
-
-    <section class="card">
-      <h2>Ambient brightness</h2>
-      <template v-if="panel.ambient">
-        <p class="value">
-          {{ panel.ambient.value }}<span class="unit">%</span>
-        </p>
-        <p class="meta">
-          raw {{ panel.ambient.raw }} · {{ panel.ambient.mv }} mV ·
-          {{ ambientAge }}s ago
-        </p>
-      </template>
-      <p
-        v-else
-        class="placeholder"
-      >
-        awaiting first reading…
-      </p>
-    </section>
-  </main>
+    <AlarmBanner />
+    <main>
+      <section class="col schedule">
+        <ScheduleList />
+      </section>
+      <section class="col day">
+        <StatusPanel />
+      </section>
+    </main>
+    <SettingsDrawer
+      :open="settingsOpen"
+      @close="settingsOpen = false"
+    />
+    <Splash :visible="showSplash" />
+  </div>
 </template>
 
+<script setup lang="ts">
+import { onMounted, onUnmounted, ref } from "vue";
+import { usePanelStore } from "@thread-panel/ui-core";
+import { useTheme } from "@/composables/useTheme";
+import { usePresence } from "@/composables/usePresence";
+import AlarmBanner from "@/components/AlarmBanner.vue";
+import Masthead from "@/components/Masthead.vue";
+import ScheduleList from "@/components/ScheduleList.vue";
+import StatusPanel from "@/components/StatusPanel.vue";
+import ManualFeed from "@/components/ManualFeed.vue";
+import SettingsDrawer from "@/components/SettingsDrawer.vue";
+import Splash from "@/components/Splash.vue";
+
+const panel = usePanelStore();
+const settingsOpen = ref(false);
+
+useTheme();
+const { showSplash } = usePresence();
+
+onMounted(() => panel.connect());
+onUnmounted(() => panel.disconnect());
+</script>
+
 <style scoped>
-main {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 2rem 1rem 4rem;
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-header {
-  margin-bottom: 1.5rem;
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: clamp(1.2rem, 3vw, 2.4rem);
+  padding: clamp(1rem, 2vw, 1.6rem) var(--pad) clamp(0.85rem, 1.6vw, 1.15rem);
+  position: relative;
 }
 
-h1 {
-  font-size: 1.6rem;
-  font-weight: 600;
-  margin: 0;
+.header::after {
+  content: "";
+  position: absolute;
+  left: var(--pad);
+  right: var(--pad);
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--hairline-strong) 8%,
+    var(--hairline-strong) 92%,
+    transparent
+  );
 }
 
-.subtitle {
-  margin: 0.25rem 0 0;
-  color: #6b7280;
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
 }
 
-.card {
-  background: #1a1a22;
-  border: 1px solid #262633;
-  border-radius: 10px;
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
-}
-
-h2 {
-  margin: 0 0 0.5rem;
-  font-size: 0.8rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #9ca3af;
-}
-
-.value {
-  font-size: 2.25rem;
-  font-weight: 300;
-  margin: 0;
-  line-height: 1;
-}
-
-.unit {
-  font-size: 1rem;
-  color: #6b7280;
-  margin-left: 0.35rem;
-  font-weight: 400;
-}
-
-.meta {
-  margin: 0.5rem 0 0;
-  font-size: 0.8rem;
-  color: #6b7280;
-}
-
-.placeholder {
-  color: #4b5563;
-  font-style: italic;
-  margin: 0;
-}
-
-.pill {
-  display: inline-block;
-  padding: 0.2rem 0.65rem;
+.settings {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  padding: 0.85rem 0.95rem;
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
   border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 500;
-  text-transform: lowercase;
-  letter-spacing: 0.04em;
-}
-
-.pill-ok {
-  background: rgba(74, 222, 128, 0.15);
-  color: #4ade80;
-}
-
-.pill-warn {
-  background: rgba(248, 113, 113, 0.15);
-  color: #f87171;
-}
-
-.error {
-  margin: 0.5rem 0 0;
-  color: #f87171;
-  font-size: 0.85rem;
-}
-
-button {
-  padding: 0.6rem 1.1rem;
-  background: #3b82f6;
-  color: white;
-  border: 0;
-  border-radius: 6px;
-  font-size: 0.9rem;
   cursor: pointer;
-  transition: background 0.12s;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease;
 }
 
-button:hover:not(:disabled) {
-  background: #2563eb;
+.settings:hover {
+  background: var(--brass-veil);
+  border-color: var(--brass-veil-strong);
 }
 
-button:disabled {
-  background: #374151;
-  cursor: not-allowed;
-  color: #6b7280;
+.dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--cream-soft);
+}
+
+main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: clamp(1.4rem, 3vw, 2.6rem);
+  padding: 0 var(--pad) var(--pad);
+  min-height: 0;
+}
+
+.col {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.col.schedule {
+  overflow: hidden;
 }
 </style>

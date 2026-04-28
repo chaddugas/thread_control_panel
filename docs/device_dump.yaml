@@ -1,0 +1,591 @@
+device:
+  id: d77e1fcd40ece98e74437e4e53159e77
+  name: Front Room Smart Feeder
+  manufacturer: PETLIBRO
+  model: PLAF103
+entities:
+  - entity_id: sensor.front_room_smart_feeder_device_sn
+    friendly_name: Device SN
+    domain: sensor
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: sensor.front_room_smart_feeder_mac_address
+    friendly_name: MAC Address
+    domain: sensor
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: sensor.front_room_smart_feeder_wi_fi_ssid
+    friendly_name: Wi-Fi SSID
+    domain: sensor
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: sensor.front_room_smart_feeder_wi_fi_signal_strength
+    friendly_name: Wi-Fi Signal Strength
+    domain: sensor
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: sensor.front_room_smart_feeder_desiccant_remaining_days
+    friendly_name: Desiccant Remaining Days
+    domain: sensor
+    platform: petlibro
+    disabled: false
+    state: "-120.0"
+    attributes:
+      state_class: measurement
+      unit_of_measurement: d
+      device_class: duration
+      icon: mdi:package
+      friendly_name: Front Room Smart Feeder Desiccant Remaining Days
+  - entity_id: sensor.front_room_smart_feeder_battery_level
+    friendly_name: Battery Level
+    domain: sensor
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: sensor.front_room_smart_feeder_battery_ac
+    friendly_name: Battery / AC %
+    domain: sensor
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: sensor.front_room_smart_feeder_today_s_feeding_times
+    friendly_name: Today's Feeding Times
+    domain: sensor
+    platform: petlibro
+    disabled: false
+    state: "3"
+    attributes:
+      state_class: total_increasing
+      icon: mdi:history
+      friendly_name: Front Room Smart Feeder Today's Feeding Times
+  - entity_id: sensor.front_room_smart_feeder_last_feed_time
+    friendly_name: Last Feed Time
+    domain: sensor
+    platform: petlibro
+    disabled: false
+    state: "2026-04-27T22:00:38+00:00"
+    attributes:
+      device_class: timestamp
+      icon: mdi:history
+      friendly_name: Front Room Smart Feeder Last Feed Time
+  - entity_id: sensor.front_room_smart_feeder_buttons_lock
+    friendly_name: Buttons Lock
+    domain: sensor
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: button.front_room_smart_feeder_manual_feed
+    friendly_name: Manual Feed
+    domain: button
+    platform: petlibro
+    disabled: false
+    state: unknown
+    attributes:
+      friendly_name: Front Room Smart Feeder Manual Feed
+  - entity_id: button.front_room_smart_feeder_turn_on_indicator
+    friendly_name: Turn On Indicator
+    domain: button
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: button.front_room_smart_feeder_turn_off_indicator
+    friendly_name: Turn Off Indicator
+    domain: button
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: button.front_room_smart_feeder_desiccant_reset
+    friendly_name: Desiccant Reset
+    domain: button
+    platform: petlibro
+    disabled: false
+    state: unknown
+    attributes:
+      friendly_name: Front Room Smart Feeder Desiccant Reset
+  - entity_id: binary_sensor.front_room_smart_feeder_food_dispenser
+    friendly_name: Food Dispenser
+    domain: binary_sensor
+    platform: petlibro
+    disabled: false
+    state: "off"
+    attributes:
+      device_class: problem
+      icon: mdi:bowl-outline
+      friendly_name: Front Room Smart Feeder Food Dispenser
+  - entity_id: binary_sensor.front_room_smart_feeder_food_status
+    friendly_name: Food Status
+    domain: binary_sensor
+    platform: petlibro
+    disabled: false
+    state: "off"
+    attributes:
+      device_class: problem
+      icon: mdi:bowl-mix-outline
+      friendly_name: Front Room Smart Feeder Food Status
+  - entity_id: binary_sensor.front_room_smart_feeder_wi_fi
+    friendly_name: Wi-Fi
+    domain: binary_sensor
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: binary_sensor.front_room_smart_feeder_sleep_mode
+    friendly_name: Sleep Mode
+    domain: binary_sensor
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: binary_sensor.front_room_smart_feeder_battery_status
+    friendly_name: Battery Status
+    domain: binary_sensor
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: binary_sensor.front_room_smart_feeder_indicator
+    friendly_name: Indicator
+    domain: binary_sensor
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: number.front_room_smart_feeder_desiccant_frequency
+    friendly_name: Desiccant Frequency
+    domain: number
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: update.front_room_smart_feeder_firmware
+    friendly_name: Firmware
+    domain: update
+    platform: petlibro
+    disabled: false
+    state: "off"
+    attributes:
+      auto_update: false
+      display_precision: 0
+      installed_version: 1.1.1
+      in_progress: false
+      latest_version: 1.1.1
+      release_summary: ""
+      release_url: https://petlibro.com/pages/help-center
+      skipped_version: null
+      title: Granary Smart Feeder Firmware
+      update_percentage: null
+      device_class: firmware
+      entity_picture: /api/brands/integration/petlibro/icon.png
+      friendly_name: Front Room Smart Feeder Firmware
+      supported_features: 17
+  - entity_id: sensor.front_room_smart_feeder_today_s_feeding_quantity_weight
+    friendly_name: Today's Feeding Quantity (Weight)
+    domain: sensor
+    platform: petlibro
+    disabled: false
+    state: "130.0"
+    attributes:
+      state_class: total_increasing
+      g: 130
+      oz: 4.55
+      unit_of_measurement: g
+      device_class: weight
+      icon: mdi:scale
+      friendly_name: Front Room Smart Feeder Today's Feeding Quantity (Weight)
+  - entity_id: sensor.front_room_smart_feeder_today_s_feeding_quantity_volume
+    friendly_name: Today's Feeding Quantity (Volume)
+    domain: sensor
+    platform: petlibro
+    disabled: false
+    state: "8.79164590247918"
+    attributes:
+      state_class: total_increasing
+      cups: 1.083
+      mL: 260
+      unit_of_measurement: fl. oz.
+      device_class: volume
+      icon: mdi:scale
+      friendly_name: Front Room Smart Feeder Today's Feeding Quantity (Volume)
+  - entity_id: sensor.front_room_smart_feeder_last_feed_quantity_weight
+    friendly_name: Last Feed Quantity (Weight)
+    domain: sensor
+    platform: petlibro
+    disabled: false
+    state: "40.0"
+    attributes:
+      state_class: measurement
+      g: 40
+      oz: 1.4
+      unit_of_measurement: g
+      device_class: weight
+      icon: mdi:history
+      friendly_name: Front Room Smart Feeder Last Feed Quantity (Weight)
+  - entity_id: sensor.front_room_smart_feeder_last_feed_quantity_volume
+    friendly_name: Last Feed Quantity (Volume)
+    domain: sensor
+    platform: petlibro
+    disabled: false
+    state: "2.70512181614744"
+    attributes:
+      state_class: total
+      cups: 0.333
+      mL: 80
+      unit_of_measurement: fl. oz.
+      device_class: volume
+      icon: mdi:history
+      friendly_name: Front Room Smart Feeder Last Feed Quantity (Volume)
+  - entity_id: sensor.front_room_smart_feeder_next_feed_time
+    friendly_name: Next Feed Time
+    domain: sensor
+    platform: petlibro
+    disabled: false
+    state: "2026-04-28T02:30:00+00:00"
+    attributes:
+      label: ""
+      id: 4190201
+      meal_call: false
+      device_class: timestamp
+      icon: mdi:calendar-arrow-right
+      friendly_name: Front Room Smart Feeder Next Feed Time
+  - entity_id: sensor.front_room_smart_feeder_next_feed_quantity_weight
+    friendly_name: Next Feed Quantity (Weight)
+    domain: sensor
+    platform: petlibro
+    disabled: false
+    state: "50.0"
+    attributes:
+      state_class: measurement
+      g: 50
+      oz: 1.75
+      unit_of_measurement: g
+      device_class: weight
+      icon: mdi:calendar-arrow-right
+      friendly_name: Front Room Smart Feeder Next Feed Quantity (Weight)
+  - entity_id: sensor.front_room_smart_feeder_next_feed_quantity_volume
+    friendly_name: Next Feed Quantity (Volume)
+    domain: sensor
+    platform: petlibro
+    disabled: false
+    state: "3.3814022701843"
+    attributes:
+      state_class: total
+      cups: 0.417
+      mL: 100
+      unit_of_measurement: fl. oz.
+      device_class: volume
+      icon: mdi:calendar-arrow-right
+      friendly_name: Front Room Smart Feeder Next Feed Quantity (Volume)
+  - entity_id: select.front_room_smart_feeder_manual_feed_quantity
+    friendly_name: Manual Feed Quantity
+    domain: select
+    platform: petlibro
+    disabled: false
+    state: ¹/₁₂
+    attributes:
+      options:
+        - ¹/₁₂
+        - ²/₁₂
+        - ³/₁₂
+        - ⁴/₁₂
+        - ⁵/₁₂
+        - ⁶/₁₂
+        - ⁷/₁₂
+        - ⁸/₁₂
+        - ⁹/₁₂
+        - ¹⁰/₁₂
+        - ¹¹/₁₂
+        - "1"
+        - 1 ¹/₁₂
+        - 1 ²/₁₂
+        - 1 ³/₁₂
+        - 1 ⁴/₁₂
+        - 1 ⁵/₁₂
+        - 1 ⁶/₁₂
+        - 1 ⁷/₁₂
+        - 1 ⁸/₁₂
+        - 1 ⁹/₁₂
+        - 1 ¹⁰/₁₂
+        - 1 ¹¹/₁₂
+        - "2"
+        - 2 ¹/₁₂
+        - 2 ²/₁₂
+        - 2 ³/₁₂
+        - 2 ⁴/₁₂
+        - 2 ⁵/₁₂
+        - 2 ⁶/₁₂
+        - 2 ⁷/₁₂
+        - 2 ⁸/₁₂
+        - 2 ⁹/₁₂
+        - 2 ¹⁰/₁₂
+        - 2 ¹¹/₁₂
+        - "3"
+        - 3 ¹/₁₂
+        - 3 ²/₁₂
+        - 3 ³/₁₂
+        - 3 ⁴/₁₂
+        - 3 ⁵/₁₂
+        - 3 ⁶/₁₂
+        - 3 ⁷/₁₂
+        - 3 ⁸/₁₂
+        - 3 ⁹/₁₂
+        - 3 ¹⁰/₁₂
+        - 3 ¹¹/₁₂
+        - "4"
+      unit_of_measurement: cups
+      icon: mdi:scale
+      friendly_name: Front Room Smart Feeder Manual Feed Quantity
+  - entity_id: button.front_room_smart_feeder_enable_selected_plan
+    friendly_name: Enable Selected Plan
+    domain: button
+    platform: petlibro
+    disabled: false
+    state: unknown
+    attributes:
+      icon: mdi:calendar-check
+      friendly_name: Front Room Smart Feeder Enable Selected Plan
+  - entity_id: button.front_room_smart_feeder_disable_selected_plan
+    friendly_name: Disable Selected Plan
+    domain: button
+    platform: petlibro
+    disabled: false
+    state: unknown
+    attributes:
+      icon: mdi:calendar-remove
+      friendly_name: Front Room Smart Feeder Disable Selected Plan
+  - entity_id: button.front_room_smart_feeder_delete_selected_plan
+    friendly_name: Delete Selected Plan
+    domain: button
+    platform: petlibro
+    disabled: false
+    state: unknown
+    attributes:
+      icon: mdi:calendar-minus
+      friendly_name: Front Room Smart Feeder Delete Selected Plan
+  - entity_id: button.front_room_smart_feeder_skip_selected_plan_today
+    friendly_name: Skip Selected Plan Today
+    domain: button
+    platform: petlibro
+    disabled: false
+    state: unknown
+    attributes:
+      icon: mdi:calendar-today
+      friendly_name: Front Room Smart Feeder Skip Selected Plan Today
+  - entity_id: button.front_room_smart_feeder_un_skip_selected_plan_today
+    friendly_name: Un-skip Selected Plan Today
+    domain: button
+    platform: petlibro
+    disabled: false
+    state: unknown
+    attributes:
+      icon: mdi:calendar-today
+      friendly_name: Front Room Smart Feeder Un-skip Selected Plan Today
+  - entity_id: button.front_room_smart_feeder_enable_today_s_feeding_schedule
+    friendly_name: Enable Today's Feeding Schedule
+    domain: button
+    platform: petlibro
+    disabled: false
+    state: unknown
+    attributes:
+      icon: mdi:calendar-check
+      friendly_name: Front Room Smart Feeder Enable Today's Feeding Schedule
+  - entity_id: button.front_room_smart_feeder_disable_today_s_feeding_schedule
+    friendly_name: Disable Today's Feeding Schedule
+    domain: button
+    platform: petlibro
+    disabled: false
+    state: unknown
+    attributes:
+      icon: mdi:calendar-remove
+      friendly_name: Front Room Smart Feeder Disable Today's Feeding Schedule
+  - entity_id: binary_sensor.front_room_smart_feeder_today_s_feeding_schedule
+    friendly_name: Today's Feeding Schedule
+    domain: binary_sensor
+    platform: petlibro
+    disabled: false
+    state: "on"
+    attributes:
+      plan_1:
+        planID: 2747466
+        time: "08:00"
+        amount_cups: 0.417
+        amount_oz: 1.75
+        amount_g: 50
+        amount_ml: 100
+        amount_raw: 5
+        feed_conv_factor: 1
+        enabled: true
+        repeat_days: "[7,1,2,3,4,5,6]"
+        sound: false
+        feed_state: Completed
+        repeat: true
+      plan_2:
+        planID: 4190212
+        time: "12:00"
+        amount_cups: 0.333
+        amount_oz: 1.4
+        amount_g: 40
+        amount_ml: 80
+        amount_raw: 4
+        feed_conv_factor: 1
+        enabled: true
+        repeat_days: "[7,1,2,3,4,5,6]"
+        sound: true
+        feed_state: Completed
+        repeat: true
+      plan_3:
+        planID: 2747467
+        time: "16:00"
+        amount_cups: 0.333
+        amount_oz: 1.4
+        amount_g: 40
+        amount_ml: 80
+        amount_raw: 4
+        feed_conv_factor: 1
+        enabled: true
+        repeat_days: "[7,1,2,3,4,5,6]"
+        sound: false
+        feed_state: Completed
+        repeat: true
+      plan_4:
+        planID: 4190201
+        time: "20:30"
+        amount_cups: 0.417
+        amount_oz: 1.75
+        amount_g: 50
+        amount_ml: 100
+        amount_raw: 5
+        feed_conv_factor: 1
+        enabled: true
+        repeat_days: "[7,1,2,3,4,5,6]"
+        sound: false
+        feed_state: Pending
+        repeat: true
+      device_class: running
+      icon: mdi:calendar-check
+      friendly_name: Front Room Smart Feeder Today's Feeding Schedule
+  - entity_id: binary_sensor.front_room_smart_feeder_feeding_schedule
+    friendly_name: Feeding Schedule
+    domain: binary_sensor
+    platform: petlibro
+    disabled: false
+    state: "on"
+    attributes:
+      plan_2747466:
+        planID: 2747466
+        time: "08:00"
+        amount_cups: 0.417
+        amount_oz: 1.75
+        amount_g: 50
+        amount_ml: 100
+        amount_raw: 5
+        feed_conv_factor: 1
+        enabled: true
+        repeat_days: "[7,1,2,3,4,5,6]"
+        sound: false
+        feed_state: Completed
+      plan_4190212:
+        planID: 4190212
+        time: "12:00"
+        amount_cups: 0.333
+        amount_oz: 1.4
+        amount_g: 40
+        amount_ml: 80
+        amount_raw: 4
+        feed_conv_factor: 1
+        enabled: true
+        repeat_days: "[7,1,2,3,4,5,6]"
+        sound: true
+        feed_state: Completed
+      plan_2747467:
+        planID: 2747467
+        time: "16:00"
+        amount_cups: 0.333
+        amount_oz: 1.4
+        amount_g: 40
+        amount_ml: 80
+        amount_raw: 4
+        feed_conv_factor: 1
+        enabled: true
+        repeat_days: "[7,1,2,3,4,5,6]"
+        sound: false
+        feed_state: Completed
+      plan_4190201:
+        planID: 4190201
+        time: "20:30"
+        amount_cups: 0.417
+        amount_oz: 1.75
+        amount_g: 50
+        amount_ml: 100
+        amount_raw: 5
+        feed_conv_factor: 1
+        enabled: true
+        repeat_days: "[7,1,2,3,4,5,6]"
+        sound: false
+        feed_state: Pending
+      device_class: running
+      icon: mdi:calendar-clock
+      friendly_name: Front Room Smart Feeder Feeding Schedule
+  - entity_id: number.front_room_smart_feeder_manual_feed_quantity
+    friendly_name: Manual Feed Quantity
+    domain: number
+    platform: petlibro
+    disabled: true
+    state: null
+    attributes: {}
+  - entity_id: select.front_room_smart_feeder_feeding_schedule
+    friendly_name: Feeding Schedule
+    domain: select
+    platform: petlibro
+    disabled: false
+    state: plan_2747466 - 2747466
+    attributes:
+      options:
+        - plan_2747466 - 2747466
+        - plan_4190212 - 4190212
+        - plan_2747467 - 2747467
+        - plan_4190201 - 4190201
+      icon: mdi:calendar-clock
+      friendly_name: Front Room Smart Feeder Feeding Schedule
+  - entity_id: select.front_room_smart_feeder_today_s_feeding_schedule
+    friendly_name: Today's Feeding Schedule
+    domain: select
+    platform: petlibro
+    disabled: false
+    state: plan_1 - 2747466
+    attributes:
+      options:
+        - plan_1 - 2747466
+        - plan_2 - 4190212
+        - plan_3 - 2747467
+        - plan_4 - 4190201
+      icon: mdi:calendar-clock
+      friendly_name: Front Room Smart Feeder Today's Feeding Schedule
+  - entity_id: button.front_room_smart_feeder_disable_feeding_schedule
+    friendly_name: Disable Feeding Schedule
+    domain: button
+    platform: petlibro
+    disabled: false
+    state: unknown
+    attributes:
+      friendly_name: Front Room Smart Feeder Disable Feeding Schedule
+  - entity_id: button.front_room_smart_feeder_enable_feeding_schedule
+    friendly_name: Enable Feeding Schedule
+    domain: button
+    platform: petlibro
+    disabled: false
+    state: unknown
+    attributes:
+      friendly_name: Front Room Smart Feeder Enable Feeding Schedule

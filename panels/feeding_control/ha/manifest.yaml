@@ -1,29 +1,70 @@
 # Integration-facing manifest for the feeding_control panel.
 #
-# Consumed by the thread_panel custom HA integration. Each entry here declares
-# one HA entity to forward to the panel:
+# Consumed by the thread_panel custom HA integration. Each entry declares one
+# HA entity to forward to the panel.
 #
 #   entity_id:  the full HA entity_id (domain.object_id) to mirror.
 #   attributes: controls which of the entity's attributes are forwarded.
 #       omit or []   forward state only, no attributes
 #       [a, b, c]    forward only these named attribute keys
-#       all          forward every attribute (use for entities whose attribute
-#                    keys are dynamic, e.g. a schedule whose keys vary per item)
+#       all          forward every attribute (use when keys are dynamic, e.g.
+#                    a schedule whose keys vary per item)
 #
-# Entity IDs below are placeholders — replace with the real PetLibro entity IDs
-# in your Home Assistant install.
+# Targets the PETLIBRO PLAF103 ("Front Room Smart Feeder"). Replace entity_ids
+# if you re-add the device under a different name.
 
 panel_id: feeding_control
 
 entities:
-  - entity_id: light.chad_s_office_desk_lamp
-    attributes: []
-
-  - entity_id: light.chad_s_office_ambiance_lights
+  # — Schedule (today's instance) —
+  # plan_N keys are dynamic (user can have 1..N feedings/day), so forward all.
+  # Each plan_N exposes: time, amount_g, amount_cups, amount_oz, amount_ml,
+  # enabled, repeat, repeat_days, sound, feed_state ("Pending"|"Completed"|
+  # "Skipped"), planID. The binary state ("on"/"off") reflects whether the
+  # whole day's schedule is enabled.
+  - entity_id: binary_sensor.front_room_smart_feeder_today_s_feeding_schedule
     attributes: all
 
-  - entity_id: light.chad_s_office_overhead_light_3
-    attributes:
-      - max_color_temp_kelvin
+  # — Live status —
+  - entity_id: sensor.front_room_smart_feeder_next_feed_time
+    attributes: [id]              # `id` is the planID — lets UI highlight upcoming row
+  - entity_id: sensor.front_room_smart_feeder_next_feed_quantity_weight
+    attributes: []                # state is grams
+  - entity_id: sensor.front_room_smart_feeder_last_feed_time
+    attributes: []
+  - entity_id: sensor.front_room_smart_feeder_last_feed_quantity_weight
+    attributes: []
 
-  - entity_id: light.chad_s_office_overhead_light_2
+  # — Today running totals —
+  - entity_id: sensor.front_room_smart_feeder_today_s_feeding_times
+    attributes: []
+  - entity_id: sensor.front_room_smart_feeder_today_s_feeding_quantity_weight
+    attributes: []
+
+  # — Alarms (device_class: problem) —
+  - entity_id: binary_sensor.front_room_smart_feeder_food_status
+    attributes: []                # "on" = out of food
+  - entity_id: binary_sensor.front_room_smart_feeder_food_dispenser
+    attributes: []                # "on" = dispenser jammed
+
+  # — Manual feed (stateful select+button pattern) —
+  # UI flow: set quantity select, then press feed button.
+  - entity_id: select.front_room_smart_feeder_manual_feed_quantity
+    attributes: [options]
+  - entity_id: button.front_room_smart_feeder_manual_feed
+    attributes: []
+
+  # — Skip / un-skip today's plan (stateful select+button pattern) —
+  # UI flow: set today's-schedule select to plan_N, then press skip/un-skip.
+  - entity_id: select.front_room_smart_feeder_today_s_feeding_schedule
+    attributes: [options]
+  - entity_id: button.front_room_smart_feeder_skip_selected_plan_today
+    attributes: []
+  - entity_id: button.front_room_smart_feeder_un_skip_selected_plan_today
+    attributes: []
+
+  # — Pause / resume whole day —
+  - entity_id: button.front_room_smart_feeder_enable_today_s_feeding_schedule
+    attributes: []
+  - entity_id: button.front_room_smart_feeder_disable_today_s_feeding_schedule
+    attributes: []

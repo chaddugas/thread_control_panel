@@ -6,5 +6,6 @@
       "envManager": "ms-python.python:venv",
       "packageManager": "ms-python.python:pip"
     }
-  ]
+  ],
+  "cmake.sourceDirectory": "/Users/chaddugas/Developer/thread_control_panel/panels/feeding_control/firmware"
 }
