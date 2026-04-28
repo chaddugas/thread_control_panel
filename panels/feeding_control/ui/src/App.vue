@@ -1,30 +1,32 @@
 <template>
   <div class="app">
-    <header class="header">
-      <Masthead />
-      <div class="tools">
-        <ManualFeed />
-        <button
-          class="settings"
-          type="button"
-          aria-label="Open settings"
-          @click="settingsOpen = true"
-        >
-          <span class="dot" />
-          <span class="dot" />
-          <span class="dot" />
-        </button>
-      </div>
-    </header>
-    <AlarmBanner />
-    <main>
-      <section class="col schedule">
-        <ScheduleList />
-      </section>
-      <section class="col day">
-        <StatusPanel />
-      </section>
-    </main>
+    <div class="app-shell">
+      <header class="header">
+        <Masthead />
+        <div class="tools">
+          <ManualFeed />
+          <button
+            class="settings"
+            type="button"
+            aria-label="Open settings"
+            @click="settingsOpen = true"
+          >
+            <span class="dot" />
+            <span class="dot" />
+            <span class="dot" />
+          </button>
+        </div>
+      </header>
+      <AlarmBanner />
+      <main>
+        <section class="col schedule">
+          <ScheduleList />
+        </section>
+        <section class="col day">
+          <StatusPanel />
+        </section>
+      </main>
+    </div>
     <SettingsDrawer
       :open="settingsOpen"
       @close="settingsOpen = false"
@@ -59,9 +61,13 @@ onUnmounted(() => panel.disconnect());
 <style scoped>
 .app {
   height: 100vh;
+  overflow: hidden;
+}
+
+.app-shell {
+  height: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 .header {

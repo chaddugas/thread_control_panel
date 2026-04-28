@@ -11,7 +11,12 @@
         <span class="sign">&minus;</span>
       </button>
       <div class="qty-block">
-        <span class="qty frac">{{ formatTwelfths(twelfths) }}</span>
+        <Ticker
+          :value="twelfths"
+          :direction="lastDirection"
+        >
+          <span class="qty frac">{{ formatTwelfths(twelfths) }}</span>
+        </Ticker>
         <span class="unit">{{ unit }}</span>
       </div>
       <button
@@ -43,6 +48,7 @@
 import { computed, ref, watch } from "vue";
 import { useFeeder } from "@/composables/useFeeder";
 import { formatTwelfths } from "@/utils/fractions";
+import Ticker from "./Ticker.vue";
 
 const feeder = useFeeder();
 const options = computed(() => feeder.manualFeedQty.value.options);
@@ -67,12 +73,20 @@ const canNext = computed(() => idx.value < max.value);
 const twelfths = computed(() => (idx.value + 1) * 3);
 const unit = computed(() => (twelfths.value === 12 ? "cup" : "cups"));
 
+const lastDirection = ref<"up" | "down">("up");
+
 function prev(): void {
-  if (canPrev.value) idx.value -= 1;
+  if (canPrev.value) {
+    lastDirection.value = "down";
+    idx.value -= 1;
+  }
 }
 
 function next(): void {
-  if (canNext.value) idx.value += 1;
+  if (canNext.value) {
+    lastDirection.value = "up";
+    idx.value += 1;
+  }
 }
 
 function feed(): void {

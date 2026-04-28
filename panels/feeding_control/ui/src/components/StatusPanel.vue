@@ -5,20 +5,30 @@
     </header>
 
     <div class="hero">
-      <span class="label">Up next at</span>
+      <span class="label shared-vt-upnext-label">Up next at</span>
       <template v-if="status.nextFeedAt">
-        <div class="time">
-          <span class="hour">{{ formatHourMinute(status.nextFeedAt) }}</span>
-          <span class="meridiem">{{ formatMeridiem(status.nextFeedAt) }}</span>
+        <div class="time shared-vt-hero-time">
+          <Ticker
+            :value="`${formatHourMinute(status.nextFeedAt)} ${formatMeridiem(status.nextFeedAt)}`"
+          >
+            <span class="time-row">
+              <span class="hour">{{ formatHourMinute(status.nextFeedAt) }}</span>
+              <span class="meridiem">{{ formatMeridiem(status.nextFeedAt) }}</span>
+            </span>
+          </Ticker>
         </div>
         <span
           v-if="amountLine"
-          class="amount serif-italic"
-        >&mdash; {{ amountLine }} &mdash;</span>
+          class="amount serif-italic shared-vt-amount"
+        >
+          &mdash;&nbsp;<Ticker :value="amountLine" />&nbsp;&mdash;
+        </span>
         <span
           v-if="relativeLine"
-          class="relative serif-italic"
-        >{{ relativeLine }}</span>
+          class="relative serif-italic shared-vt-relative"
+        >
+          <Ticker :value="relativeLine" />
+        </span>
       </template>
       <span
         v-else
@@ -33,10 +43,14 @@
         <span class="line-label eyebrow">Last served</span>
         <span class="line-value">
           <template v-if="status.lastFeedAt">
-            <span class="time-line">
-              <span class="hour-sm">{{ formatHourMinute(status.lastFeedAt) }}</span>
-              <span class="meridiem-sm">{{ formatMeridiem(status.lastFeedAt) }}</span>
-            </span>
+            <Ticker
+              :value="`${formatHourMinute(status.lastFeedAt)} ${formatMeridiem(status.lastFeedAt)}`"
+            >
+              <span class="time-line">
+                <span class="hour-sm">{{ formatHourMinute(status.lastFeedAt) }}</span>
+                <span class="meridiem-sm">{{ formatMeridiem(status.lastFeedAt) }}</span>
+              </span>
+            </Ticker>
           </template>
           <span
             v-else
@@ -48,7 +62,12 @@
         <span class="line-label eyebrow">Today</span>
         <span class="line-value">
           <span class="tally serif-italic">
-            <span class="tally-num">{{ status.todayFeedCount }}</span>
+            <Ticker
+              :value="status.todayFeedCount"
+              direction="up"
+            >
+              <span class="tally-num">{{ status.todayFeedCount }}</span>
+            </Ticker>
             {{ status.todayFeedCount === 1 ? "plate" : "plates" }}
           </span>
         </span>
@@ -61,6 +80,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useFeeder } from "@/composables/useFeeder";
 import { formatTwelfths } from "@/utils/fractions";
+import Ticker from "./Ticker.vue";
 
 const feeder = useFeeder();
 const status = feeder.status;
@@ -148,13 +168,18 @@ const relativeLine = computed(() => {
 .time {
   display: inline-flex;
   align-items: baseline;
-  gap: 0.32rem;
   font-family: var(--display);
   font-variation-settings: "opsz" 144, "SOFT" 40, "WONK" 1;
   font-feature-settings: "lnum", "tnum";
   color: var(--cream);
   line-height: 0.95;
   letter-spacing: -0.015em;
+}
+
+.time-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.32rem;
 }
 
 .hour {

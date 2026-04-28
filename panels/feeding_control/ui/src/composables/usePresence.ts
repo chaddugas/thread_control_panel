@@ -1,4 +1,4 @@
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { usePanelStore } from "@thread-panel/ui-core";
 
 function envNumber(raw: string | undefined, fallback: number): number {
@@ -17,6 +17,28 @@ const TAP_HOLD_MS = envNumber(
   import.meta.env.VITE_PRESENCE_TAP_HOLD_MS,
   20_000,
 );
+
+type DocWithVT = Document & {
+  startViewTransition?: (
+    cb: () => void | Promise<void>,
+  ) => { finished: Promise<void> };
+};
+
+function startSplashTransition(commit: () => void | Promise<void>): void {
+  const start = (document as DocWithVT).startViewTransition;
+  if (typeof start !== "function") {
+    void commit();
+    return;
+  }
+  document.documentElement.classList.add("vt-splash");
+  const t = start.call(document, async () => {
+    await commit();
+    await nextTick();
+  });
+  t.finished.finally(() => {
+    document.documentElement.classList.remove("vt-splash");
+  });
+}
 
 /**
  * "Is someone interacting with the panel right now?" derived from the
@@ -48,9 +70,17 @@ export function usePresence() {
     return Date.now() - lastTapAt.value < TAP_HOLD_MS;
   }
 
+  function setEngaged(next: boolean): void {
+    if (engaged.value === next) return;
+    startSplashTransition(() => {
+      engaged.value = next;
+      document.documentElement.classList.toggle("splash-on", !next);
+    });
+  }
+
   function recordTap(): void {
     lastTapAt.value = Date.now();
-    engaged.value = true;
+    setEngaged(true);
     clearFarTimer();
   }
 
@@ -58,34 +88,28 @@ export function usePresence() {
     stopWatch = watch(
       () => panel.proximity?.value ?? null,
       (cm) => {
-        if (cm === null || cm === 0) {
-          // Sensor offline or invalid reading — keep current state.
-          return;
-        }
+        if (cm === null || cm === 0) return;
         if (cm <= NEAR_CM) {
           clearFarTimer();
-          engaged.value = true;
+          setEngaged(true);
           return;
         }
         if (cm >= FAR_CM) {
           if (farTimer !== null || !engaged.value) return;
           farTimer = window.setTimeout(() => {
             farTimer = null;
-            if (!tapHoldActive()) engaged.value = false;
+            if (!tapHoldActive()) setEngaged(false);
           }, FAR_DEBOUNCE_MS);
           return;
         }
-        // Dead zone — cancel any pending far transition, hold current state.
         clearFarTimer();
       },
       { immediate: true },
     );
 
-    // Re-check tap-hold expiry once a second so we drift into the splash
-    // after the timeout if the sensor remains "far" the whole time.
     tapTick = window.setInterval(() => {
       if (!tapHoldActive() && (panel.proximity?.value ?? 0) >= FAR_CM) {
-        engaged.value = false;
+        setEngaged(false);
       }
     }, 1_000);
 

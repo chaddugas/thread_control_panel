@@ -1,19 +1,25 @@
 <template>
-  <section class="menu">
+  <section
+    class="menu"
+    :class="{ 'is-paused': !enabled }"
+  >
     <header class="head">
       <span class="eyebrow">The day's plates</span>
-      <span
-        v-if="!enabled"
-        class="paused"
-      >paused</span>
+      <Transition name="paused">
+        <span
+          v-if="!enabled"
+          class="paused"
+        >paused</span>
+      </Transition>
     </header>
     <ol class="rows">
       <ScheduleRow
-        v-for="plan in plans"
+        v-for="(plan, i) in plans"
         :key="plan.key"
         :plan="plan"
         :is-next="plan.planID === nextPlanId"
         :open="openKey === plan.key"
+        :row-index="i"
         @toggle="onToggle(plan.key)"
         @close="openKey = null"
         @skip="onSkip"
@@ -30,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useFeeder } from "@/composables/useFeeder";
 import type { Plan } from "@/types";
 import ScheduleRow from "./ScheduleRow.vue";
@@ -76,6 +82,37 @@ function onUnskip(plan: Plan): void {
   feeder.unskipPlan(plan.key);
   openKey.value = null;
 }
+
+/**
+ * When the next-up plan changes (a meal completes, the upcoming plan
+ * advances), wrap the resulting DOM update in a View Transition so the
+ * brass lozenge appears to travel from the served row to the new "next"
+ * row instead of snapping. Pre-flush watch keeps the old `.row.next`
+ * class in place when we snapshot, so OLD has the lozenge at the old
+ * position and NEW has it at the new position — the API morphs.
+ */
+type DocWithVT = Document & {
+  startViewTransition?: (
+    cb: () => void | Promise<void>,
+  ) => { finished: Promise<void> };
+};
+
+watch(
+  () => feeder.status.value.nextPlanId,
+  (newId, oldId) => {
+    if (newId === oldId) return;
+    const start = (document as DocWithVT).startViewTransition;
+    if (typeof start !== "function") return;
+    document.documentElement.classList.add("vt-next-marker");
+    const t = start.call(document, async () => {
+      await nextTick();
+    });
+    t.finished.finally(() => {
+      document.documentElement.classList.remove("vt-next-marker");
+    });
+  },
+  { flush: "pre" },
+);
 
 /**
  * Close the open row whenever a pointerdown lands outside it. We use
@@ -134,6 +171,20 @@ onUnmounted(() => {
   font-size: 0.95rem;
   color: var(--brass);
   letter-spacing: 0.02em;
+  display: inline-block;
+}
+
+.paused-enter-active,
+.paused-leave-active {
+  transition:
+    opacity 320ms ease,
+    transform 380ms cubic-bezier(0.32, 0.05, 0.2, 1);
+}
+
+.paused-enter-from,
+.paused-leave-to {
+  opacity: 0;
+  transform: translateX(10px);
 }
 
 .rows {
@@ -143,6 +194,11 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   scroll-behavior: smooth;
+  transition: opacity 380ms ease;
+}
+
+.menu.is-paused .rows {
+  opacity: 0.55;
 }
 
 .placeholder {

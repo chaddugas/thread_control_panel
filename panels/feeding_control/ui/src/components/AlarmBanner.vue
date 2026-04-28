@@ -56,24 +56,46 @@ const kind = computed(() =>
 }
 
 .sigil {
+  display: inline-block;
   font-style: normal;
   color: var(--brass);
   font-size: 0.95rem;
   letter-spacing: 0;
-  transform: translateY(-1px);
+  transform-origin: center;
+  animation: alarm-sigil-breath 2s ease-in-out infinite;
 }
 
 .banner.critical .sigil {
   color: var(--rust);
+  animation-duration: 1.4s;
+}
+
+@keyframes alarm-sigil-breath {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(1) translateY(-1px);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.14) translateY(-1px);
+  }
 }
 
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 240ms ease;
+  transition:
+    opacity 320ms ease,
+    transform 420ms cubic-bezier(0.32, 0.05, 0.2, 1);
 }
 
-.fade-enter-from,
+.fade-enter-from {
+  opacity: 0;
+  transform: translateY(-14px);
+}
+
 .fade-leave-to {
   opacity: 0;
+  transform: translateY(-8px);
 }
 </style>

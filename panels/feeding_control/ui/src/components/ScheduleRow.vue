@@ -1,8 +1,9 @@
 <template>
   <li
     :data-row-key="plan.key"
+    :data-row-index="rowIndex"
     :class="[
-      'row',
+      'row vt-row',
       {
         open,
         next: isNext,
@@ -30,10 +31,9 @@
         <span class="qty frac">{{ formatTwelfths(plan.amount_raw) }}</span>
         <span class="unit">cup</span>
       </span>
-      <span
-        v-if="stateLabel"
-        class="state-label"
-      >{{ stateLabel }}</span>
+      <span class="state-label">
+        <Ticker :value="stateLabel" />
+      </span>
     </button>
     <div
       class="actions"
@@ -64,11 +64,13 @@
 import { computed } from "vue";
 import type { Plan } from "@/types";
 import { formatTwelfths } from "@/utils/fractions";
+import Ticker from "./Ticker.vue";
 
 const props = defineProps<{
   plan: Plan;
   isNext?: boolean;
   open?: boolean;
+  rowIndex?: number;
 }>();
 defineEmits<{
   (e: "toggle"): void;
@@ -170,6 +172,19 @@ const stateLabel = computed(() => {
   background: var(--brass);
   border-color: var(--brass);
   box-shadow: 0 0 0 4px var(--brass-veil);
+  animation: lozenge-breath 2.6s ease-in-out infinite;
+}
+
+@keyframes lozenge-breath {
+  0%,
+  100% {
+    box-shadow: 0 0 0 4px var(--brass-veil);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 7px var(--brass-veil-strong);
+    transform: scale(1.08);
+  }
 }
 
 .time {
@@ -180,6 +195,9 @@ const stateLabel = computed(() => {
   font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 1;
   color: var(--cream);
   font-feature-settings: "lnum", "tnum";
+  transition:
+    color 380ms ease,
+    text-decoration-color 380ms ease;
 }
 
 .hour {
@@ -187,6 +205,7 @@ const stateLabel = computed(() => {
   font-weight: 360;
   letter-spacing: -0.01em;
   line-height: 1;
+  transition: color 380ms ease;
 }
 
 .meridiem {
@@ -196,6 +215,7 @@ const stateLabel = computed(() => {
   font-size: 0.95rem;
   color: var(--cream-muted);
   letter-spacing: 0.02em;
+  transition: color 380ms ease;
 }
 
 .separator {
@@ -219,6 +239,9 @@ const stateLabel = computed(() => {
   font-size: 1.45rem;
   font-weight: 380;
   color: var(--cream);
+  transition:
+    color 380ms ease,
+    text-decoration-color 380ms ease;
 }
 
 .unit {
@@ -228,6 +251,9 @@ const stateLabel = computed(() => {
   font-size: 0.95rem;
   color: var(--cream-muted);
   letter-spacing: 0.02em;
+  transition:
+    color 380ms ease,
+    text-decoration-color 380ms ease;
 }
 
 .state-label {
@@ -257,7 +283,7 @@ const stateLabel = computed(() => {
 .row.skipped .unit {
   color: var(--cream-faint);
   text-decoration: line-through;
-  text-decoration-color: rgba(241, 234, 215, 0.18);
+  text-decoration-color: var(--hairline-strong);
   text-decoration-thickness: 1px;
 }
 
@@ -292,9 +318,22 @@ const stateLabel = computed(() => {
   font-variation-settings: "opsz" 14, "SOFT" 70, "WONK" 1;
   font-size: 1rem;
   cursor: pointer;
-  transition:
-    border-color 160ms ease,
-    color 160ms ease;
+  transform: translateY(6px);
+  transition-property: border-color, color, transform;
+  transition-duration: 160ms, 160ms, 360ms;
+  transition-timing-function: ease, ease, cubic-bezier(0.32, 0.05, 0.2, 1);
+}
+
+.row.open .action {
+  transform: translateY(0);
+}
+
+.row.open .action.skip {
+  transition-delay: 0ms, 0ms, 70ms;
+}
+
+.row.open .action.unskip {
+  transition-delay: 0ms, 0ms, 130ms;
 }
 
 .action.skip:hover:not(:disabled) {

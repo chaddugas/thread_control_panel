@@ -1,12 +1,16 @@
 <template>
   <div class="masthead">
     <div class="meta">
-      <span class="date">{{ dateLine }}</span>
+      <span class="date shared-vt-date">
+        <Ticker :value="dateLine" />
+      </span>
       <span
         class="bullet"
         aria-hidden="true"
       >&middot;</span>
-      <span class="clock serif-italic">{{ clockLine }}</span>
+      <span class="clock serif-italic shared-vt-clock">
+        <Ticker :value="clockLine" />
+      </span>
     </div>
     <h1 class="title">
       Today's <em>Menu</em>
@@ -16,6 +20,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import Ticker from "./Ticker.vue";
 
 const now = ref(new Date());
 let timer: number | undefined;

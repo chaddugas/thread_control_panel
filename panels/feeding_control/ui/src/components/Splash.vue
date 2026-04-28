@@ -1,59 +1,70 @@
 <template>
-  <Transition name="splash">
-    <div
-      v-if="visible"
-      class="splash"
-      role="presentation"
-    >
-      <div class="frame">
-        <div class="head">
-          <span class="date">{{ dateLine }}</span>
-          <span class="clock serif-italic">{{ clockLine }}</span>
-        </div>
+  <div
+    v-if="visible"
+    class="splash"
+    role="presentation"
+  >
+    <div class="frame">
+      <div class="head">
+        <span class="date shared-vt-date">
+          <Ticker :value="dateLine" />
+        </span>
+        <span class="clock serif-italic shared-vt-clock">
+          <Ticker :value="clockLine" />
+        </span>
+      </div>
 
-        <div class="hero">
-          <template v-if="alarm">
-            <span class="label">A note</span>
-            <span class="time alarm-line">{{ alarm }}</span>
-            <span class="amount serif-italic">tap to attend</span>
-          </template>
-          <template v-else-if="paused">
-            <span class="label">Today is paused</span>
-            <span class="time-paused serif-italic">No plates are scheduled.</span>
-          </template>
-          <template v-else-if="nextLine">
-            <span class="label">Up next at</span>
-            <div class="time">
-              <span class="hour">{{ nextLine.hour }}</span>
-              <span class="meridiem">{{ nextLine.meridiem }}</span>
-            </div>
-            <span
-              v-if="amountLine"
-              class="amount serif-italic"
-            >&mdash; {{ amountLine }} &mdash;</span>
-            <span
-              v-if="relativeLine"
-              class="relative"
-            >{{ relativeLine }}</span>
-          </template>
-          <template v-else>
-            <span class="label">Today's menu</span>
-            <span class="time-paused serif-italic">Awaiting the next plate.</span>
-          </template>
-        </div>
+      <div class="hero">
+        <template v-if="alarm">
+          <span class="label">A note</span>
+          <span class="time alarm-line">{{ alarm }}</span>
+          <span class="amount serif-italic">tap to attend</span>
+        </template>
+        <template v-else-if="paused">
+          <span class="label">Today is paused</span>
+          <span class="time-paused serif-italic">No plates are scheduled.</span>
+        </template>
+        <template v-else-if="nextLine">
+          <span class="label shared-vt-upnext-label">Up next at</span>
+          <div class="time shared-vt-hero-time">
+            <Ticker :value="`${nextLine.hour} ${nextLine.meridiem}`">
+              <span class="time-row">
+                <span class="hour">{{ nextLine.hour }}</span>
+                <span class="meridiem">{{ nextLine.meridiem }}</span>
+              </span>
+            </Ticker>
+          </div>
+          <span
+            v-if="amountLine"
+            class="amount serif-italic shared-vt-amount"
+          >
+            &mdash;&nbsp;<Ticker :value="amountLine" />&nbsp;&mdash;
+          </span>
+          <span
+            v-if="relativeLine"
+            class="relative shared-vt-relative"
+          >
+            <Ticker :value="relativeLine" />
+          </span>
+        </template>
+        <template v-else>
+          <span class="label">Today's menu</span>
+          <span class="time-paused serif-italic">Awaiting the next plate.</span>
+        </template>
+      </div>
 
-        <div class="footer">
-          <span class="ornament">&#x276E; &#x2756; &#x276F;</span>
-        </div>
+      <div class="footer">
+        <span class="ornament">&#x276E; &#x2756; &#x276F;</span>
       </div>
     </div>
-  </Transition>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useFeeder } from "@/composables/useFeeder";
 import { formatTwelfths } from "@/utils/fractions";
+import Ticker from "./Ticker.vue";
 
 defineProps<{ visible: boolean }>();
 
@@ -225,13 +236,18 @@ const relativeLine = computed(() => {
 .time {
   display: inline-flex;
   align-items: baseline;
-  gap: 0.4em;
   font-family: var(--display);
   font-variation-settings: "opsz" 144, "SOFT" 50, "WONK" 1;
   font-feature-settings: "lnum", "tnum";
   color: var(--cream);
   line-height: 0.9;
   letter-spacing: -0.02em;
+}
+
+.time-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4em;
 }
 
 .hour {
@@ -289,15 +305,5 @@ const relativeLine = computed(() => {
   font-size: 1rem;
   letter-spacing: 0.4em;
   color: var(--brass);
-}
-
-.splash-enter-active,
-.splash-leave-active {
-  transition: opacity 320ms ease;
-}
-
-.splash-enter-from,
-.splash-leave-to {
-  opacity: 0;
 }
 </style>

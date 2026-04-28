@@ -149,3 +149,141 @@ button {
 .frac {
   font-feature-settings: "frac", "ss01";
 }
+
+/* === View Transitions API ============================================= */
+
+/* --- Theme: circular reveal from center -------------------------------- */
+html.vt-theme::view-transition-old(root),
+html.vt-theme::view-transition-new(root) {
+  mix-blend-mode: normal;
+}
+
+html.vt-theme::view-transition-old(root) {
+  animation: none;
+  z-index: 1;
+}
+
+html.vt-theme::view-transition-new(root) {
+  animation: theme-reveal 700ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  z-index: 2;
+}
+
+@keyframes theme-reveal {
+  from { clip-path: circle(0% at 50% 50%); }
+  to { clip-path: circle(150% at 50% 50%); }
+}
+
+/* --- Splash <-> Full view: shared element morphing --------------------- */
+
+/* Default: full-UI elements own the names. */
+.shared-vt-date { view-transition-name: vt-date; }
+.shared-vt-clock { view-transition-name: vt-clock; }
+.shared-vt-upnext-label { view-transition-name: vt-upnext-label; }
+.shared-vt-hero-time { view-transition-name: vt-hero-time; }
+.shared-vt-amount { view-transition-name: vt-amount-line; }
+.shared-vt-relative { view-transition-name: vt-relative-line; }
+
+/* When splash is mounted, its overlay's elements take the names; the
+ * full-UI counterparts inside .app-shell give theirs up. */
+html.splash-on .app-shell .shared-vt-date,
+html.splash-on .app-shell .shared-vt-clock,
+html.splash-on .app-shell .shared-vt-upnext-label,
+html.splash-on .app-shell .shared-vt-hero-time,
+html.splash-on .app-shell .shared-vt-amount,
+html.splash-on .app-shell .shared-vt-relative {
+  view-transition-name: none;
+}
+
+/* Splash transition timing — gentle morph, no plus-lighter compositing. */
+html.vt-splash::view-transition-group(*) {
+  animation-duration: 620ms;
+  animation-timing-function: cubic-bezier(0.32, 0.05, 0.2, 1);
+}
+
+html.vt-splash::view-transition-old(root),
+html.vt-splash::view-transition-new(root) {
+  animation-duration: 480ms;
+  animation-timing-function: cubic-bezier(0.4, 0.05, 0.2, 1);
+}
+
+/* --- Schedule rows: staggered fade — only during splash transitions. ---
+ * Names activate when (a) we're mid-splash-transition and (b) splash is
+ * not currently on (i.e., we're snapshotting the full-view state). The
+ * other state has the rows fall back into the root crossfade. */
+html.vt-splash:not(.splash-on) .vt-row[data-row-index="0"] { view-transition-name: vt-row-0; }
+html.vt-splash:not(.splash-on) .vt-row[data-row-index="1"] { view-transition-name: vt-row-1; }
+html.vt-splash:not(.splash-on) .vt-row[data-row-index="2"] { view-transition-name: vt-row-2; }
+html.vt-splash:not(.splash-on) .vt-row[data-row-index="3"] { view-transition-name: vt-row-3; }
+html.vt-splash:not(.splash-on) .vt-row[data-row-index="4"] { view-transition-name: vt-row-4; }
+html.vt-splash:not(.splash-on) .vt-row[data-row-index="5"] { view-transition-name: vt-row-5; }
+html.vt-splash:not(.splash-on) .vt-row[data-row-index="6"] { view-transition-name: vt-row-6; }
+html.vt-splash:not(.splash-on) .vt-row[data-row-index="7"] { view-transition-name: vt-row-7; }
+html.vt-splash:not(.splash-on) .vt-row[data-row-index="8"] { view-transition-name: vt-row-8; }
+html.vt-splash:not(.splash-on) .vt-row[data-row-index="9"] { view-transition-name: vt-row-9; }
+
+@keyframes row-stagger-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes row-stagger-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(10px); }
+}
+
+::view-transition-new(vt-row-0),
+::view-transition-new(vt-row-1),
+::view-transition-new(vt-row-2),
+::view-transition-new(vt-row-3),
+::view-transition-new(vt-row-4),
+::view-transition-new(vt-row-5),
+::view-transition-new(vt-row-6),
+::view-transition-new(vt-row-7),
+::view-transition-new(vt-row-8),
+::view-transition-new(vt-row-9) {
+  animation: row-stagger-in 360ms cubic-bezier(0.32, 0.05, 0.2, 1) forwards;
+}
+
+::view-transition-old(vt-row-0),
+::view-transition-old(vt-row-1),
+::view-transition-old(vt-row-2),
+::view-transition-old(vt-row-3),
+::view-transition-old(vt-row-4),
+::view-transition-old(vt-row-5),
+::view-transition-old(vt-row-6),
+::view-transition-old(vt-row-7),
+::view-transition-old(vt-row-8),
+::view-transition-old(vt-row-9) {
+  animation: row-stagger-out 280ms cubic-bezier(0.4, 0.05, 0.2, 1) forwards;
+}
+
+::view-transition-old(vt-row-0),
+::view-transition-new(vt-row-0) { animation-delay: 0ms; }
+::view-transition-old(vt-row-1),
+::view-transition-new(vt-row-1) { animation-delay: 35ms; }
+::view-transition-old(vt-row-2),
+::view-transition-new(vt-row-2) { animation-delay: 70ms; }
+::view-transition-old(vt-row-3),
+::view-transition-new(vt-row-3) { animation-delay: 105ms; }
+::view-transition-old(vt-row-4),
+::view-transition-new(vt-row-4) { animation-delay: 140ms; }
+::view-transition-old(vt-row-5),
+::view-transition-new(vt-row-5) { animation-delay: 175ms; }
+::view-transition-old(vt-row-6),
+::view-transition-new(vt-row-6) { animation-delay: 210ms; }
+::view-transition-old(vt-row-7),
+::view-transition-new(vt-row-7) { animation-delay: 245ms; }
+::view-transition-old(vt-row-8),
+::view-transition-new(vt-row-8) { animation-delay: 280ms; }
+::view-transition-old(vt-row-9),
+::view-transition-new(vt-row-9) { animation-delay: 315ms; }
+
+/* --- Next-up lozenge: travels between rows when nextPlanId advances --- */
+html.vt-next-marker .row.next .lozenge {
+  view-transition-name: vt-next-marker;
+}
+
+html.vt-next-marker::view-transition-group(vt-next-marker) {
+  animation-duration: 600ms;
+  animation-timing-function: cubic-bezier(0.32, 0.05, 0.2, 1);
+}

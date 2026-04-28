@@ -23,25 +23,50 @@ function chooseTheme(value: number, current: Theme): Theme {
   return current;
 }
 
+function applyImmediate(t: Theme): void {
+  document.documentElement.dataset.theme = t;
+}
+
+function startThemeTransition(commit: () => void): void {
+  type DocWithVT = Document & {
+    startViewTransition?: (cb: () => void | Promise<void>) => {
+      finished: Promise<void>;
+    };
+  };
+  const start = (document as DocWithVT).startViewTransition;
+  if (typeof start !== "function") {
+    commit();
+    return;
+  }
+  document.documentElement.classList.add("vt-theme");
+  const t = start.call(document, commit);
+  t.finished.finally(() => {
+    document.documentElement.classList.remove("vt-theme");
+  });
+}
+
 export function useTheme() {
   const panel = usePanelStore();
   const theme = ref<Theme>("dark");
 
-  function apply(t: Theme): void {
-    theme.value = t;
-    document.documentElement.dataset.theme = t;
+  function setTheme(next: Theme): void {
+    if (next === theme.value) return;
+    startThemeTransition(() => {
+      theme.value = next;
+      applyImmediate(next);
+    });
   }
 
   let stop: (() => void) | null = null;
 
   onMounted(() => {
-    apply(theme.value);
+    applyImmediate(theme.value);
     stop = watch(
       () => panel.ambient?.value ?? null,
       (v) => {
         if (v === null) return;
         const next = chooseTheme(v, theme.value);
-        if (next !== theme.value) apply(next);
+        if (next !== theme.value) setTheme(next);
       },
       { immediate: true },
     );
