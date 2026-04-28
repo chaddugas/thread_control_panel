@@ -13,6 +13,11 @@ export default defineConfig({
         new URL("../../../platform/ui-core/src", import.meta.url),
       ),
     },
+    // ui-core lives outside this package's node_modules tree, so Rollup's
+    // strict Node resolution can't find vue/pinia when bundling its files.
+    // Dedupe forces these to resolve from the project root regardless of
+    // where they're imported from — same instance everywhere, build works.
+    dedupe: ["vue", "pinia"],
   },
   server: {
     port: 5173,
