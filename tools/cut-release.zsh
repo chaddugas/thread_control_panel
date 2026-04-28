@@ -24,6 +24,31 @@ cut-release() {
     return 1
   fi
 
+  # Rebuild every panel's UI dist/ so the release ships matching source +
+  # bundle. Vite builds are deterministic given source, so this is a no-op
+  # when nothing has changed; when something has, the dirty-tree handler
+  # below picks up the dist diff alongside any uncommitted source work.
+  local repo_root_pre
+  repo_root_pre=$(git rev-parse --show-toplevel)
+  local ui_dir
+  for ui_dir in "$repo_root_pre"/panels/*/ui; do
+    [[ -d "$ui_dir" ]] || continue
+    if ! command -v yarn >/dev/null 2>&1; then
+      print -u2 "cut-release: yarn not found on PATH"
+      return 1
+    fi
+    if [[ ! -d "$ui_dir/node_modules" ]]; then
+      print -u2 "cut-release: $ui_dir/node_modules missing — run 'yarn install' there first"
+      return 1
+    fi
+    print "→ Rebuilding ${ui_dir#$repo_root_pre/}..."
+    if ! ( cd "$ui_dir" && yarn build ); then
+      print -u2 "cut-release: build failed for $ui_dir"
+      return 1
+    fi
+  done
+  print ""
+
   # If the working tree is dirty, offer to commit everything as one commit
   # before proceeding. An empty commit message aborts.
   if ! git diff --quiet || ! git diff --cached --quiet; then

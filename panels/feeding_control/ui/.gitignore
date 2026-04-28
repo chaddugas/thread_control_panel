@@ -1,7 +1,9 @@
 node_modules/
-dist/
 .vite/
 .env
 .env.local
 *.local
 *.log
+
+# dist/ is intentionally NOT ignored here — it's committed for kiosk deploy.
+# `cut-release` rebuilds it before tagging. See repo-root .gitignore.

@@ -1,0 +1,52 @@
+[Unit]
+Description=Cage kiosk — Wayland compositor running Chromium fullscreen
+Documentation=https://github.com/chaddugas/thread_control_panel
+After=panel-ui.service systemd-user-sessions.service
+Requires=panel-ui.service
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+Type=simple
+# Replace `pi` with your Pi username if different. The user must be in the
+# video, input, and render groups (install-pi.sh handles this).
+User=pi
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+
+# Cage runs Chromium as its single child process. When Chromium exits, cage
+# exits, and systemd restarts the unit — so a Chromium crash recovers itself.
+#
+# Chromium flags:
+#   --kiosk                       — fullscreen, no UI chrome
+#   --noerrdialogs                — suppress modal error popups
+#   --no-first-run                — skip welcome wizard on a fresh profile
+#   --disable-translate           — kill the "translate this page" prompts
+#   --disable-features=TranslateUI  same, newer codepath
+#   --disable-pinch               — touch ergonomics: no pinch zoom
+#   --overscroll-history-navigation=0 — no swipe-to-go-back
+#   --check-for-update-interval=31536000 — disable update checks (yearly)
+#   --password-store=basic        — don't try to use kwallet/gnome-keyring
+ExecStart=/usr/bin/cage -- /usr/bin/chromium \
+    --kiosk \
+    --noerrdialogs \
+    --no-first-run \
+    --disable-translate \
+    --disable-features=TranslateUI \
+    --disable-pinch \
+    --overscroll-history-navigation=0 \
+    --check-for-update-interval=31536000 \
+    --password-store=basic \
+    http://localhost:8080
+
+Restart=always
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target

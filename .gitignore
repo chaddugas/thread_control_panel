@@ -14,6 +14,13 @@ dist/
 .vite/
 *.local
 
+# Per-panel UI builds are committed for kiosk deploy. `cut-release` rebuilds
+# dist/ before tagging so each release ships a matching source + bundle, and
+# the Pi pulls a ready-to-serve dist/ on each panel-bridge restart instead of
+# building locally.
+!panels/*/ui/dist/
+!panels/*/ui/dist/**
+
 # Python
 __pycache__/
 *.py[cod]

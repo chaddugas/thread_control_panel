@@ -1,0 +1,19 @@
+[Unit]
+Description=feeding_control UI — static file server for the kiosk
+Documentation=https://github.com/chaddugas/thread_control_panel
+After=network.target
+
+[Service]
+Type=simple
+# Replace `pi` with your Pi username if different.
+User=pi
+# python3's built-in http.server is single-threaded, which is fine for a
+# single-client kiosk. Bound to localhost — cage's Chromium reaches it
+# directly, nothing else needs to.
+WorkingDirectory=/home/pi/thread_control_panel/panels/feeding_control/ui/dist
+ExecStart=/usr/bin/python3 -m http.server --bind 127.0.0.1 8080
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
