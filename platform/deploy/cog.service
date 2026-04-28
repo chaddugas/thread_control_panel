@@ -1,5 +1,5 @@
 [Unit]
-Description=Cog kiosk — WPE WebKit single-app browser on DRM
+Description=Kiosk — cage Wayland compositor running cog (WPE WebKit)
 Documentation=https://github.com/chaddugas/thread_control_panel
 After=panel-ui.service systemd-user-sessions.service
 Requires=panel-ui.service
@@ -20,10 +20,17 @@ StandardInput=tty
 StandardOutput=journal
 StandardError=journal
 
-# Cog renders WPE WebKit straight to DRM/KMS — no compositor, no Chromium.
-# Memory footprint is ~100-150 MB resident, vs Chromium's 300+ MB which
-# OOM-loops on the Pi Zero 2 W's 512 MB. Cog is the WebKit project's own
-# embedded-kiosk launcher; touch + WebSocket + modern CSS all just work.
+# Architecture: cage is a minimal wlroots-based Wayland compositor that owns
+# the DRM/KMS device. Cog runs as cage's child, rendering via WPE-FDO into a
+# Wayland surface. We need a compositor in the loop because the Waveshare
+# 6.25" panel is natively portrait (720x1560) and there's no way to rotate
+# the framebuffer 90°/270° without one — Pi OS Lite's vc4-kms-v3d ignores
+# `video=...rotate=N` for HDMI outputs. Cage's `-r` flag applies a 90° output
+# transform per occurrence (one for 90°, two for 180°, three for 270°), and
+# wlroots rotates touch coordinates to match automatically.
+#
+# Combined memory footprint (cage + cog) is ~140-170 MB resident on the Pi
+# Zero 2 W's 512 MB. Cage adds ~10-20 MB on top of cog alone.
 #
 # WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1: disables the bubblewrap-based
 # sandbox WPE uses to isolate its WebProcess. Required because Debian's
@@ -32,7 +39,7 @@ StandardError=journal
 # config?"). We're a kiosk loading only our own localhost UI — the sandbox
 # protects against malicious sites we don't have, so disabling it is fine.
 Environment=WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
-ExecStart=/usr/bin/cog -P drm http://localhost:8080
+ExecStart=/usr/bin/cage -r -- /usr/bin/cog -P fdo http://localhost:8080
 
 Restart=always
 RestartSec=2s
