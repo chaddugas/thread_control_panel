@@ -42,6 +42,17 @@ StandardError=journal
 # config?"). We're a kiosk loading only our own localhost UI — the sandbox
 # protects against malicious sites we don't have, so disabling it is fine.
 Environment=WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+
+# Reap any orphan sway/cog from a previous session before starting. Sway's
+# PAMName=login opens a login session that can detach child processes
+# (notably the cog spawned by sway's `exec` directive) from the unit's
+# cgroup, so systemctl stop doesn't always reap them. The leftover cog
+# holds the Wayland socket; the next cog instance races it and crashes
+# with a `g_object_unref` assertion. The `-` prefix means "don't fail
+# the unit if there's nothing to kill" (the common case).
+ExecStartPre=-/usr/bin/pkill -9 -x cog
+ExecStartPre=-/usr/bin/pkill -9 -x sway
+
 ExecStart=/usr/bin/sway -c /home/pi/thread_control_panel/platform/deploy/sway-kiosk.config
 
 Restart=always
