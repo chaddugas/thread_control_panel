@@ -204,6 +204,47 @@ static void on_uart_line(const char *line, size_t len)
         return;
     }
 
+    // panel_cmd: bridge wants to fire an outbound command on the C6's
+    // behalf. Same name-extraction shape as panel_state, but published to
+    // cmd/<name> non-retained (commands are events, not state). The first
+    // user is `cmd/resync`, fired by the bridge whenever the UART link
+    // first comes up — asks the integration to republish every entity
+    // snapshot so the kiosk catches up after the boot-time race where the
+    // Pi wasn't ready to read UART when the C6 first subscribed to MQTT.
+    if (strstr(line, "\"type\":\"panel_cmd\"") != NULL)
+    {
+        const char *name_start = strstr(line, "\"name\":\"");
+        if (name_start == NULL)
+        {
+            ESP_LOGW(TAG, "panel_cmd missing name field, dropping");
+            return;
+        }
+        name_start += strlen("\"name\":\"");
+        const char *name_end = strchr(name_start, '"');
+        if (name_end == NULL)
+        {
+            ESP_LOGW(TAG, "panel_cmd name field unterminated, dropping");
+            return;
+        }
+        int name_len = (int)(name_end - name_start);
+
+        char topic[128];
+        int tn = snprintf(topic, sizeof(topic), "%s%.*s",
+                          PANEL_TOPIC_CMD_PREFIX, name_len, name_start);
+        if (tn <= 0 || tn >= (int)sizeof(topic))
+        {
+            ESP_LOGW(TAG, "panel_cmd topic overflow, dropping");
+            return;
+        }
+
+        int msg_id = panel_net_publish(topic, line, (int)len, 0, 0);
+        if (msg_id < 0)
+        {
+            ESP_LOGW(TAG, "panel_cmd publish failed — MQTT not connected");
+        }
+        return;
+    }
+
     ESP_LOGW(TAG, "UART line has no known routing, dropping: %s", line);
 }
 

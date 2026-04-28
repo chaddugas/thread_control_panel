@@ -11,6 +11,13 @@ TOPIC_ENTITY_STATE = "thread_panel/{panel_id}/state/entity/{entity_id}"
 TOPIC_ENTITY_STATE_WILDCARD = "thread_panel/{panel_id}/state/entity/#"
 TOPIC_CALL_SERVICE = "thread_panel/{panel_id}/cmd/call_service"
 
+# Resync command — bridge fires this whenever its UART link to the C6 first
+# comes up (cold boot, Pi restart, link drop). Integration responds by
+# republishing the roster + every declared entity_state, so the kiosk
+# catches up after the boot-time race where the Pi UART wasn't ready when
+# the C6 first subscribed and retained messages were lost.
+TOPIC_CMD_RESYNC = "thread_panel/{panel_id}/cmd/resync"
+
 # Panel-itself topics — the C6's own availability (LWT-backed) and the
 # per-panel sensor readings it publishes periodically.
 TOPIC_PANEL_AVAILABILITY = "thread_panel/{panel_id}/availability"

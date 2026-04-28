@@ -70,7 +70,29 @@ async def main() -> None:
         if not ok:
             log.warning("client message dropped — UART link is down: %s", msg)
 
-    uart = UartLink(UART_PORT, UART_BAUD, on_uart_message)
+    async def on_uart_link_up() -> None:
+        """Fired by UartLink each time it (re)opens the serial port.
+
+        Asks the integration to republish every entity_state retained
+        topic. This catches the boot-time race: the C6 boots faster
+        than the Pi, subscribes to MQTT and receives all retained
+        entity_state messages while the Pi UART driver isn't ready
+        yet — so the bytes get dropped at the line and the kiosk
+        starts blank. Without this resync, the kiosk only learns
+        anything when HA next changes a state.
+
+        Brief sleep first to let the C6 see the UART come back before
+        we send anything (C6 has its own UART buffer; not strictly
+        required but smooths out the cold-boot case).
+        """
+        await asyncio.sleep(2.0)
+        ok = await uart.send({"type": "panel_cmd", "name": "resync"})
+        if ok:
+            log.info("Sent panel_cmd resync to C6 — kiosk should catch up shortly")
+        else:
+            log.warning("panel_cmd resync send failed — UART link not yet writable")
+
+    uart = UartLink(UART_PORT, UART_BAUD, on_uart_message, on_link_up=on_uart_link_up)
     ws = WsServer(WS_HOST, WS_PORT, cache.snapshot, on_client_message)
     bridge = PanelBridge(uart)
 

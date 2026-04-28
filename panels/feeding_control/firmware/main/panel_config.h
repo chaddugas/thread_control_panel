@@ -27,6 +27,13 @@
 // dispatch as HA service calls.
 #define PANEL_TOPIC_CMD_CALL_SERVICE       "thread_panel/" PANEL_ID "/cmd/call_service"
 
+// Generic outbound command prefix. Bridge → C6 (over UART, as panel_cmd
+// envelopes) → MQTT cmd/<name>. Currently used for `cmd/resync` to ask the
+// integration to republish every entity_state on demand (e.g. after Pi
+// boot, when retained messages were lost because the Pi UART wasn't ready
+// yet when the C6 first subscribed).
+#define PANEL_TOPIC_CMD_PREFIX             "thread_panel/" PANEL_ID "/cmd/"
+
 // Panel-itself control channel. `set/#` carries HA-driven changes to
 // panel-owned state (brightness, screen_on, wifi_*); forwarded to the Pi
 // over UART for the bridge to act on. `state/<name>` carries the Pi's

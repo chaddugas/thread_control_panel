@@ -15,13 +15,25 @@ import serial_asyncio
 log = logging.getLogger(__name__)
 
 OnMessage = Callable[[dict], Awaitable[None]]
+OnLinkUp = Callable[[], Awaitable[None]]
 
 
 class UartLink:
-    def __init__(self, port: str, baud: int, on_message: OnMessage) -> None:
+    def __init__(
+        self,
+        port: str,
+        baud: int,
+        on_message: OnMessage,
+        on_link_up: OnLinkUp | None = None,
+    ) -> None:
         self._port = port
         self._baud = baud
         self._on_message = on_message
+        # Fired after each successful UART open. Used by the bridge to
+        # send a `cmd/resync` to the integration so the kiosk catches up
+        # on retained state that may have been lost during the boot-time
+        # race (Pi UART not ready when C6 first subscribed to MQTT).
+        self._on_link_up = on_link_up
         self._writer: asyncio.StreamWriter | None = None
 
     async def run(self) -> None:
@@ -38,6 +50,11 @@ class UartLink:
 
             self._writer = writer
             log.info("UART link up on %s @ %d", self._port, self._baud)
+            if self._on_link_up is not None:
+                try:
+                    await self._on_link_up()
+                except Exception:
+                    log.exception("on_link_up handler raised")
             try:
                 await self._read_loop(reader)
             except (OSError, serial.SerialException) as e:

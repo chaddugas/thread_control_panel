@@ -177,7 +177,14 @@ static void start_mqtt_client(void)
             // across multiple MQTT_EVENT_DATA callbacks, and panel_app's
             // forwarders treat each chunk as a complete message and drop
             // both. Bumping the input buffer keeps payloads contiguous.
-            .size = 4096,
+            //
+            // 8 KB rather than just 4 KB to give headroom for the burst
+            // case: cmd/resync (see panel_app.c) tells the integration to
+            // republish every declared entity back-to-back, and esp-mqtt
+            // shares the in/out buffer space for staging while the UART
+            // forwarder drains. Cheap RAM on the C6, expensive to be
+            // wrong about it.
+            .size = 8192,
         },
     };
 

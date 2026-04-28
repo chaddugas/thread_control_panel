@@ -21,6 +21,7 @@ from .const import (
     STORAGE_VERSION,
     TOPIC_AVAILABILITY,
     TOPIC_CALL_SERVICE,
+    TOPIC_CMD_RESYNC,
     TOPIC_ENTITY_STATE,
     TOPIC_ROSTER,
 )
@@ -56,6 +57,9 @@ class PanelForwarder:
     def _t_call_service(self) -> str:
         return TOPIC_CALL_SERVICE.format(panel_id=self.panel_id)
 
+    def _t_cmd_resync(self) -> str:
+        return TOPIC_CMD_RESYNC.format(panel_id=self.panel_id)
+
     async def async_start(self) -> None:
         # Start offline; flip to online only after initial state is fully published.
         await self._publish_availability(PAYLOAD_OFFLINE)
@@ -85,6 +89,16 @@ class PanelForwarder:
         self._unsubs.append(
             await mqtt.async_subscribe(
                 self.hass, self._t_call_service(), self._handle_call_service
+            )
+        )
+
+        # Resync request channel — bridge fires this whenever its UART
+        # link first comes up. We republish the roster and every entity
+        # snapshot so the kiosk catches up after a boot-time race or
+        # bridge restart.
+        self._unsubs.append(
+            await mqtt.async_subscribe(
+                self.hass, self._t_cmd_resync(), self._handle_resync
             )
         )
 
@@ -208,6 +222,31 @@ class PanelForwarder:
         return any(
             old.attributes.get(a) != new.attributes.get(a) for a in decl.attributes
         )
+
+    @callback
+    def _handle_resync(self, msg) -> None:
+        """Republish roster + every declared entity's current state.
+
+        Triggered by the bridge over MQTT when its UART link to the C6
+        comes up. Idempotent — re-running just refreshes the retained
+        topics with the same values they already had. Payload is ignored
+        (it's a verb, not data).
+        """
+        _LOGGER.info(
+            "Panel %s: cmd/resync received — republishing roster + %d entities",
+            self.panel_id,
+            len(self.manifest.entities),
+        )
+        self.hass.async_create_task(self._do_resync())
+
+    async def _do_resync(self) -> None:
+        await self._publish_roster()
+        for decl in self.manifest.entities:
+            state = self.hass.states.get(decl.entity_id)
+            await self._publish_entity_snapshot(decl.entity_id, state)
+        # Republish ha_availability online so the C6 explicitly sees the
+        # transition and clears any stale "offline" gating.
+        await self._publish_availability(PAYLOAD_ONLINE)
 
     @callback
     def _handle_call_service(self, msg) -> None:
