@@ -1,5 +1,5 @@
 [Unit]
-Description=Kiosk — cage Wayland compositor running cog (WPE WebKit)
+Description=Kiosk — sway Wayland compositor running cog (WPE WebKit)
 Documentation=https://github.com/chaddugas/thread_control_panel
 After=panel-ui.service systemd-user-sessions.service
 Requires=panel-ui.service
@@ -20,17 +20,20 @@ StandardInput=tty
 StandardOutput=journal
 StandardError=journal
 
-# Architecture: cage is a minimal wlroots-based Wayland compositor that owns
-# the DRM/KMS device. Cog runs as cage's child, rendering via WPE-FDO into a
-# Wayland surface. We need a compositor in the loop because the Waveshare
-# 6.25" panel is natively portrait (720x1560) and there's no way to rotate
-# the framebuffer 90°/270° without one — Pi OS Lite's vc4-kms-v3d ignores
-# `video=...rotate=N` for HDMI outputs. Cage's `-r` flag applies a 90° output
-# transform per occurrence (one for 90°, two for 180°, three for 270°), and
-# wlroots rotates touch coordinates to match automatically.
+# Architecture: sway is a minimal wlroots-based compositor that owns DRM/KMS
+# and applies the output transform that rotates the Waveshare's natively-
+# portrait panel (720x1560) to landscape. Cog runs as sway's autostart child
+# via WPE-FDO, rendering into a Wayland surface that sway rotates; wlroots
+# rotates touch coordinates to match automatically.
 #
-# Combined memory footprint (cage + cog) is ~140-170 MB resident on the Pi
-# Zero 2 W's 512 MB. Cage adds ~10-20 MB on top of cog alone.
+# We picked sway over cage because Debian Bookworm's `cage` package predates
+# the upstream `-r` rotation flag, and there's no apt/cmdline path to rotate
+# 90° on Pi OS Lite without a compositor that supports output transforms.
+# Sway runs in single-app mode here (see sway-kiosk.config); it isn't doing
+# any tiling.
+#
+# Combined memory footprint (sway + cog) is ~150-180 MB resident on the Pi
+# Zero 2 W's 512 MB.
 #
 # WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1: disables the bubblewrap-based
 # sandbox WPE uses to isolate its WebProcess. Required because Debian's
@@ -39,7 +42,7 @@ StandardError=journal
 # config?"). We're a kiosk loading only our own localhost UI — the sandbox
 # protects against malicious sites we don't have, so disabling it is fine.
 Environment=WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
-ExecStart=/usr/bin/cage -r -- /usr/bin/cog -P fdo http://localhost:8080
+ExecStart=/usr/bin/sway -c /home/pi/thread_control_panel/platform/deploy/sway-kiosk.config
 
 Restart=always
 RestartSec=2s

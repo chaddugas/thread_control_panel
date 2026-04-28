@@ -10,7 +10,7 @@
 #       python3 -m venv .venv
 #       .venv/bin/pip install -e .
 #   - apt-installed the kiosk stack:
-#       sudo apt install -y cage cog
+#       sudo apt install -y sway cog
 #
 # Run as the user that'll run the kiosk (NOT as root) — sudo is invoked
 # only where it's actually needed.

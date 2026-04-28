@@ -1,5 +1,6 @@
 # Thread Control Panel — Build Plan
 
+
 The project is a **platform** for building no-WiFi Thread-based touchscreen control panels for Home Assistant, plus its **first product** (`feeding_control` — a pet feeder UI). This doc covers both: the platform-level work and the product-level work for `feeding_control`. Future products will get their own short product-specific docs and reference this one.
 
 ## Keeping this current
@@ -453,7 +454,10 @@ esp_mqtt_client_config_t mqtt_cfg = {
     - ✅ UI deploy path settled (2026-04-27): build via `yarn build` inside `cut-release`, commit `dist/` to git, Pi pulls dist/ on each `panel-bridge.service` restart. Releases are the deploy unit; UI source pushes between releases don't update what the kiosk serves until the next `cut-release`.
     - ✅ `panel-ui.service` (2026-04-27) — `python3 -m http.server` serving `panels/feeding_control/ui/dist/` on `127.0.0.1:8080`.
     - ✅ `install-pi.sh` (2026-04-27) — idempotent: templates units for non-`pi` users, adds the user to `video,input,render`, disables `getty@tty1`, symlinks units, restarts bridge + UI server.
-    - ✅ Kiosk renderer pivot from Chromium to cog (2026-04-28). First attempt used cage + Chromium kiosk, but Chromium OOM-loops on the Pi Zero 2 W's 512 MB RAM (the boot loop visible on tty1 was systemd restarting cage every 2 s after Chromium got reaped). Switched to [`cog`](https://github.com/Igalia/cog), the WPE WebKit single-app launcher: ~100-150 MB resident, renders straight to DRM (no compositor), supports modern Vue 3 / WebSocket / variable fonts. cage dropped from the stack entirely. `cog.service` replaces `cage.service`; `install-pi.sh` cleans up the legacy cage symlink on re-run.
+    - ✅ Kiosk renderer pivot from Chromium to cog (2026-04-28). First attempt used cage + Chromium kiosk, but Chromium OOM-loops on the Pi Zero 2 W's 512 MB RAM (the boot loop visible on tty1 was systemd restarting cage every 2 s after Chromium got reaped). Switched to [`cog`](https://github.com/Igalia/cog), the WPE WebKit single-app launcher: ~100-150 MB resident, supports modern Vue 3 / WebSocket / variable fonts.
+    - ✅ WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 set in cog.service (2026-04-28). Debian's bubblewrap ships with file capabilities but not setuid; modern bwrap rejects this config and refuses to start. WPE's WebProcess sandbox uses bwrap, so it failed to spawn and cog SIGTRAP'd. Disabling the sandbox is fine for a localhost-only kiosk loading our own UI. Proper alternative is `setcap -r /usr/bin/bwrap` to remove the broken caps and let bwrap fall back to unprivileged userns, but it's fragile across apt updates of bubblewrap.
+    - ✅ Compositor pivot from cage to sway (2026-04-28). Waveshare 6.25" panel is natively portrait (720x1560); the UI is landscape. Pi OS Bookworm's vc4-kms-v3d driver ignores `video=...rotate=N` for HDMI on cmdline.txt — 90°/270° rotation requires a wlroots compositor with output-transform support. Tried cage `-r` (the upstream rotation flag) but Bookworm's apt-shipped cage predates it (the help text shows `-d/-h/-m/-s/-v` and that's it). Switched to sway, configured for single-app kiosk via [`sway-kiosk.config`](../platform/deploy/sway-kiosk.config) (`output * transform 90`, no borders, autostart cog). cog runs as a sway client via `-P fdo`. Combined footprint ~150-180 MB. wlroots auto-rotates touch coordinates to match the output transform.
+    - ✅ install-pi.sh refactor (2026-04-28). Earlier version sed'd unit files in place, dirtying the working tree and breaking `git pull --ff-only` on every redeploy. Now renders substituted copies directly into `/etc/systemd/system/` and leaves tracked files alone. Migrates any existing symlink from the prior pattern.
 
 ## V2 / Post-V1 follow-ups
 

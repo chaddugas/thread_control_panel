@@ -7,8 +7,9 @@ Deployment artifacts shared across panels.
 | `panel-bridge.sh` | Runner script for the bridge service. Pulls latest, syncs deps if `pyproject.toml` changed, execs the bridge. Mirrors the interactive `panel-bridge` bashrc alias. |
 | `panel-bridge.service` | systemd unit that invokes `panel-bridge.sh` on boot and restarts on failure. |
 | `panel-ui.service` | systemd unit that serves the committed UI bundle (`panels/feeding_control/ui/dist/`) on `127.0.0.1:8080` via Python's built-in `http.server`. |
-| `cog.service` | systemd unit that launches the kiosk: [cog](https://github.com/Igalia/cog) (WPE WebKit single-app launcher) rendering directly to DRM. ~100-150 MB resident vs Chromium's 300+ MB — required on the Pi Zero 2 W's 512 MB. Conflicts with `getty@tty1.service` so cog owns the framebuffer. |
-| `install-pi.sh` | Idempotent Pi-side bootstrap. Templates the unit files for the current user, adds the user to graphics/input groups, disables getty on tty1, symlinks units into `/etc/systemd/system/`, and starts the bridge + UI server. Tears down legacy units (e.g. an earlier `cage.service`) on re-run. |
+| `cog.service` | systemd unit that launches the kiosk stack: [sway](https://swaywm.org) Wayland compositor running [cog](https://github.com/Igalia/cog) (WPE WebKit single-app launcher) as its sole client. Sway applies the output transform to rotate the panel from its native portrait orientation to landscape; cog renders via WPE-FDO into the rotated surface. Combined ~150-180 MB resident vs Chromium's 300+ MB. Conflicts with `getty@tty1.service` so sway owns the framebuffer. |
+| `sway-kiosk.config` | Sway config used by `cog.service`. Sets the output rotation, suppresses all decorations/borders, hides the cursor, and autostarts cog. |
+| `install-pi.sh` | Idempotent Pi-side bootstrap. Renders the unit files into `/etc/systemd/system/` with the current user templated in, adds the user to graphics/input groups, disables getty on tty1, and starts the bridge + UI server. Tears down legacy units (e.g. an earlier `cage.service`) on re-run. |
 
 ## How the kiosk gets its UI
 
@@ -27,14 +28,14 @@ cd ~/thread_control_panel/platform/bridge
 python3 -m venv .venv
 .venv/bin/pip install -e .
 
-# 3. apt install the kiosk launcher.
+# 3. apt install the kiosk stack.
 sudo apt update
-sudo apt install -y cog
+sudo apt install -y sway cog
 
 # 4. Bootstrap the systemd units, group memberships, getty handoff.
 ~/thread_control_panel/platform/deploy/install-pi.sh
 
-# 5. Reboot so cage takes over tty1 and group memberships apply.
+# 5. Reboot so sway takes over tty1 and group memberships apply.
 sudo reboot
 ```
 
@@ -45,7 +46,7 @@ systemctl status panel-bridge panel-ui cog
 journalctl -u cog -f      # if the kiosk misbehaves
 ```
 
-`install-pi.sh` is idempotent — re-run it after pulling unit-file updates and it'll just re-symlink and reload.
+`install-pi.sh` is idempotent — re-run it after pulling unit-file updates and it'll re-render the units into `/etc/systemd/system/` and reload. Tracked unit files in `platform/deploy/` stay clean (templating happens at install time, not in the working tree), so `git pull` keeps working without dirty-tree conflicts.
 
 ## Restarting after a code change
 
