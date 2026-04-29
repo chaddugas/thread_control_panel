@@ -18,10 +18,11 @@ XIAO ESP32-C6 (Thread + MQTT-over-TLS to Mosquitto on the HA box) ↔ UART ↔ R
 ## Repo layout
 
 ```
-custom_components/thread_panel/ # HA integration (at repo root — HACS requirement)
+hacs.json                       # HACS metadata (zip_release: true — HACS pulls release artifacts)
 platform/                       # device-agnostic, shared by every panel
 ├── firmware/components/panel_platform/   # ESP-IDF component
 ├── bridge/                     # Pi Python WS+UART daemon (panel_bridge package)
+├── integration/thread_panel/   # HA custom integration (V2: moved from repo root)
 ├── ui-core/                    # Shared Vue+Pinia primitives (TBD)
 ├── deploy/                     # systemd units, install scripts (TBD)
 └── diagnostics/                # panel_test.py, touch_test.py
@@ -33,7 +34,7 @@ panels/feeding_control/         # first product
 
 ## Conventions
 
-1. **Platform/product split is the architectural backbone.** Anything device-agnostic (would be identical for any future panel) goes in `platform/`. Anything product-specific (UI, MQTT topic specifics, `panel_app.c` behavior, reference manifest) goes in `panels/<id>/`. The `thread_panel` HA integration is platform (one install handles every panel) but sits at the repo root because HACS validates `custom_components/<domain>/` there.
+1. **Platform/product split is the architectural backbone.** Anything device-agnostic (would be identical for any future panel) goes in `platform/`. Anything product-specific (UI, MQTT topic specifics, `panel_app.c` behavior, reference manifest) goes in `panels/<id>/`. The `thread_panel` HA integration is platform (one install handles every panel) and lives under `platform/integration/thread_panel/`. HACS consumes it via release-zip artifacts (`hacs.json` `zip_release: true`) rather than reading the repo root.
 
 2. **MQTT topic schema:** `thread_panel/<panel_id>/{state,set,cmd}/<entity>` plus `availability` and `ha_availability` at the top level. Panel-itself entities (reboot, wifi, brightness, screen, sensors) are platform-shared. Product entities are forwarded generically via `state/entity/<entity_id>` + `cmd/call_service`, driven by a per-panel manifest.
 

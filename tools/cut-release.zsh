@@ -141,7 +141,7 @@ cut-release() {
   # the file.)
   local repo_root manifest_path
   repo_root=$(git rev-parse --show-toplevel)
-  manifest_path="$repo_root/custom_components/thread_panel/manifest.json"
+  manifest_path="$repo_root/platform/integration/thread_panel/manifest.json"
   if [[ -f "$manifest_path" ]]; then
     python3 - "$manifest_path" "${major}.${minor}.${patch}" <<'PY'
 import json, sys, pathlib

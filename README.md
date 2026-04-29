@@ -9,11 +9,12 @@ Each panel pairs a Raspberry Pi Zero 2 W (display + touch + sensors) with a Seee
 ## Repo layout
 
 ```
-custom_components/thread_panel/ # HA integration (at repo root — HACS requirement)
+hacs.json                       # HACS metadata (zip_release: true)
 
 platform/                       # device-agnostic, shared across every panel
 ├── firmware/                   # ESP-IDF component (panel_platform)
 ├── bridge/                     # Pi-side Python WS+UART bridge
+├── integration/thread_panel/   # HA custom integration (V2: moved from repo root)
 ├── ui-core/                    # Shared Vue+Pinia primitives (TBD)
 ├── deploy/                     # systemd units, install scripts (TBD)
 └── diagnostics/                # Pi-side smoke-test scripts
@@ -28,6 +29,6 @@ docs/                           # architecture + build plan
 tools/                          # cross-cutting deploy / dev scripts
 ```
 
-The platform/product split is the architectural backbone: anything in `platform/` should be device-agnostic (works for any future thread_panel product); anything in `panels/<id>/` is specific to that product. The HA integration sits at the repo root rather than under `platform/` because HACS validates `custom_components/<domain>/` at that path.
+The platform/product split is the architectural backbone: anything in `platform/` should be device-agnostic (works for any future thread_panel product); anything in `panels/<id>/` is specific to that product. The HA integration is platform code — HACS pulls it from a release-zip artifact via `hacs.json` `zip_release: true`, so it can live under `platform/integration/` rather than at the repo root.
 
 See [`docs/build_plan_v1.md`](docs/build_plan_v1.md) for current production state and the V1 build history, and [`docs/build_plan_v2.md`](docs/build_plan_v2.md) for the active V2 work (artifact-based releases + HA-orchestrated remote updates).
