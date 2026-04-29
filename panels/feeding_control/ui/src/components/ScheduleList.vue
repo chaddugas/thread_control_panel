@@ -4,12 +4,13 @@
     :class="{ 'is-paused': !enabled }"
   >
     <header class="head">
-      <span class="eyebrow">The day's plates</span>
+      <span class="eyebrow">The day's plates TEST TEST TEST</span>
       <Transition name="paused">
         <span
           v-if="!enabled"
           class="paused"
-        >paused</span>
+          >paused</span
+        >
       </Transition>
     </header>
     <ol class="rows">
@@ -36,10 +37,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { useFeeder } from "@/composables/useFeeder";
-import type { Plan } from "@/types";
-import ScheduleRow from "./ScheduleRow.vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useFeeder } from '@/composables/useFeeder';
+import type { Plan } from '@/types';
+import ScheduleRow from './ScheduleRow.vue';
 
 const feeder = useFeeder();
 const plans = feeder.schedule;
@@ -92,9 +93,9 @@ function onUnskip(plan: Plan): void {
  * position and NEW has it at the new position — the API morphs.
  */
 type DocWithVT = Document & {
-  startViewTransition?: (
-    cb: () => void | Promise<void>,
-  ) => { finished: Promise<void> };
+  startViewTransition?: (cb: () => void | Promise<void>) => {
+    finished: Promise<void>;
+  };
 };
 
 watch(
@@ -102,16 +103,16 @@ watch(
   (newId, oldId) => {
     if (newId === oldId) return;
     const start = (document as DocWithVT).startViewTransition;
-    if (typeof start !== "function") return;
-    document.documentElement.classList.add("vt-next-marker");
+    if (typeof start !== 'function') return;
+    document.documentElement.classList.add('vt-next-marker');
     const t = start.call(document, async () => {
       await nextTick();
     });
     t.finished.finally(() => {
-      document.documentElement.classList.remove("vt-next-marker");
+      document.documentElement.classList.remove('vt-next-marker');
     });
   },
-  { flush: "pre" },
+  { flush: 'pre' },
 );
 
 /**
@@ -124,9 +125,7 @@ function onDocumentPointerDown(ev: PointerEvent): void {
   if (openKey.value === null) return;
   const target = ev.target as Element | null;
   if (!target) return;
-  const openRow = document.querySelector(
-    `[data-row-key="${openKey.value}"]`,
-  );
+  const openRow = document.querySelector(`[data-row-key="${openKey.value}"]`);
   if (openRow && openRow.contains(target)) {
     armAutoClose();
     return;
@@ -135,13 +134,13 @@ function onDocumentPointerDown(ev: PointerEvent): void {
 }
 
 onMounted(() => {
-  document.addEventListener("pointerdown", onDocumentPointerDown, {
+  document.addEventListener('pointerdown', onDocumentPointerDown, {
     capture: true,
   });
 });
 
 onUnmounted(() => {
-  document.removeEventListener("pointerdown", onDocumentPointerDown, {
+  document.removeEventListener('pointerdown', onDocumentPointerDown, {
     capture: true,
   });
   clearAutoClose();
@@ -167,7 +166,10 @@ onUnmounted(() => {
 .paused {
   font-family: var(--display);
   font-style: italic;
-  font-variation-settings: "opsz" 14, "SOFT" 80, "WONK" 1;
+  font-variation-settings:
+    'opsz' 14,
+    'SOFT' 80,
+    'WONK' 1;
   font-size: 0.95rem;
   color: var(--brass);
   letter-spacing: 0.02em;
