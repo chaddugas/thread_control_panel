@@ -56,6 +56,13 @@ function stringArray(v: unknown): string[] {
   return v.filter((x): x is string => typeof x === "string");
 }
 
+function timeToToday(hhmm: string): Date {
+  const [h, m] = hhmm.split(":").map(Number);
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+
 export function useFeeder() {
   const panel = usePanelStore();
 
@@ -98,10 +105,39 @@ export function useFeeder() {
     const lastQty = panel.entity(ENTITIES.lastFeedQty);
     const cnt = panel.entity(ENTITIES.todayCount);
     const qty = panel.entity(ENTITIES.todayQty);
+
+    let nextFeedAt = date(next?.state);
+    let nextPlanId = next ? num(next.attributes.id) : null;
+    let nextQuantityG = nextQty ? num(nextQty.state) : null;
+
+    // PetLibro's next_feed_time sensor goes stale right after a skip while
+    // the device round-trips through the cloud — the per-plan feed_state
+    // already shows "Skipped", but the sensor still points to the skipped
+    // plan. Cross-reference: if the sensor's plan is no longer Pending,
+    // fall through to the next Pending plan after it in today's schedule.
+    if (nextPlanId !== null) {
+      const plans = schedule.value;
+      const target = plans.find((p) => p.planID === nextPlanId);
+      if (target && target.feed_state !== "Pending") {
+        const replacement = plans.find(
+          (p) => p.feed_state === "Pending" && p.time > target.time,
+        );
+        if (replacement) {
+          nextPlanId = replacement.planID;
+          nextFeedAt = timeToToday(replacement.time);
+          nextQuantityG = replacement.amount_g;
+        } else {
+          nextPlanId = null;
+          nextFeedAt = null;
+          nextQuantityG = null;
+        }
+      }
+    }
+
     return {
-      nextFeedAt: date(next?.state),
-      nextPlanId: next ? num(next.attributes.id) : null,
-      nextQuantityG: nextQty ? num(nextQty.state) : null,
+      nextFeedAt,
+      nextPlanId,
+      nextQuantityG,
       lastFeedAt: date(last?.state),
       lastQuantityG: lastQty ? num(lastQty.state) : null,
       todayFeedCount: num(cnt?.state) ?? 0,

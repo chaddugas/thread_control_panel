@@ -98,9 +98,9 @@ const hourMinute = computed(() => {
 const meridiem = computed(() => parsed.value?.ampm ?? "");
 
 const stateLabel = computed(() => {
-  if (props.isNext) return "next";
-  if (props.plan.feed_state === "Completed") return "served";
   if (props.plan.feed_state === "Skipped") return "skipped";
+  if (props.plan.feed_state === "Completed") return "served";
+  if (props.isNext) return "next";
   return "";
 });
 
