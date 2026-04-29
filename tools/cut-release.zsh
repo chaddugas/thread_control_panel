@@ -254,6 +254,22 @@ cut-release() {
     return 1
   fi
 
+  # Pre-flight: GitHub release with this tag must not already exist (a leftover
+  # from a previous failed run will cause `gh release create` to fail late, after
+  # the tag has been pushed). Offer to delete it now if found.
+  if ( cd "$repo_root" && gh release view "$new_version" >/dev/null 2>&1 ); then
+    print ""
+    print -u2 "cut-release: a GitHub release for $new_version already exists (likely leftover from a previous failed run)."
+    if gum confirm "Delete the existing release and continue?"; then
+      ( cd "$repo_root" && gh release delete "$new_version" --yes ) || {
+        print -u2 "cut-release: failed to delete existing release"
+        return 1
+      }
+    else
+      return 1
+    fi
+  fi
+
   local is_prerelease=0
   [[ "$new_version" == *-* ]] && is_prerelease=1
 
@@ -466,14 +482,39 @@ PY
   print "Publishing release..."
   local gh_args=("$new_version" "--title" "$new_version" "--notes-file" "$notes_file")
   (( is_prerelease )) && gh_args+=("--prerelease")
-  gh release create "${gh_args[@]}" \
+  if ! gh release create "${gh_args[@]}" \
     "$staging"/*.bin "$staging"/*.tar.gz "$staging"/*.zip \
-    "$staging/manifest.json" "$staging/install-pi.sh" || {
+    "$staging/manifest.json" "$staging/install-pi.sh"; then
+    print ""
     print -u2 "cut-release: gh release create failed."
-    print -u2 "  Tag was pushed; artifacts are in $staging/."
-    print -u2 "  Fix the issue and retry: gh release create ${(j: :)gh_args} \"$staging\"/*"
+    print ""
+    local recovery
+    recovery=$(gum choose --header "Cleanup options:" \
+      "Roll back: delete tag (local + remote), delete partial release, prune staging" \
+      "Keep state: leave tag + staging in place for manual recovery") || recovery="Keep state"
+    case "$recovery" in
+      Roll\ back*)
+        print "→ Deleting tag from origin..."
+        git -C "$repo_root" push --delete origin "$new_version" 2>/dev/null || true
+        print "→ Deleting local tag..."
+        git -C "$repo_root" tag -d "$new_version" 2>/dev/null || true
+        print "→ Deleting GitHub release (if any)..."
+        ( cd "$repo_root" && gh release delete "$new_version" --yes 2>/dev/null ) || true
+        print "→ Removing staging dir..."
+        rm -rf "$staging"
+        print ""
+        print "✓ Rolled back. Re-run cut-release to try again."
+        ;;
+      *)
+        print -u2 "  Tag was pushed; artifacts are in $staging/."
+        print -u2 "  Manual retry: gh release create ${(j: :)gh_args} \"$staging\"/*"
+        ;;
+    esac
     return 1
-  }
+  fi
+
+  # ----- success: clean up staging -----
+  rm -rf "$staging"
 
   local origin repo_path
   origin=$(git -C "$repo_root" remote get-url origin 2>/dev/null || print "")
