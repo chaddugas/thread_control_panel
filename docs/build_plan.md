@@ -1,5 +1,6 @@
 # Thread Control Panel — Build Plan
 
+> **Status: V1 shipped 2026-04-28.** End-to-end pipeline working: HA ↔ integration ↔ MQTT ↔ C6 ↔ Pi bridge ↔ kiosk. Auto-deploy on `cut-release`, boot-time resync, rotated-touch kiosk, schedule + manual-feed UI. See [V2 / Post-V1 follow-ups](#v2--post-v1-follow-ups) for what's next.
 
 The project is a **platform** for building no-WiFi Thread-based touchscreen control panels for Home Assistant, plus its **first product** (`feeding_control` — a pet feeder UI). This doc covers both: the platform-level work and the product-level work for `feeding_control`. Future products will get their own short product-specific docs and reference this one.
 
@@ -17,11 +18,14 @@ Small mid-step edits are fine and encouraged — better a slightly noisy diff th
 
 ## Current Status
 
+**V1 software is complete (2026-04-28).** End-to-end working: HA entity state and commands flow reliably through the C6 ↔ Pi ↔ kiosk pipeline; the kiosk auto-deploys via `cut-release` → reboot; cold boot reliably populates with full state via the resync mechanism. The remaining work for a deployed product is hardware (enclosure design + print, step 15) and the V2 follow-ups for multi-panel / multi-product support.
+
 - **MQTT-over-Thread proven end-to-end with proper TLS validation.** C6 firmware connects to Mosquitto on HA box via Thread → OTBR → LAN IPv6, authenticates with TLS using a Let's Encrypt cert chain validated against the ISRG Root X1 CA, publishes and subscribes successfully. Hostname verification is enabled (no `skip_cert_common_name_check`). The C6 resolves the broker via DNS through AdGuard, no IP literals in firmware.
 - Thread architecture validated: XIAO ESP32-C6 joins mesh, gets routable IPv6 via OTBR.
 - Pi Zero 2 W set up with SSH; PL011 enabled on GPIO 14/15 (Bluetooth disabled to free the full UART).
 - **C6 ↔ Pi UART bridge proven end-to-end** at 115200 over the Pi's PL011. HA entity state flows HA → integration → MQTT → C6 → UART → Pi → WS → UI; UI `call_service` commands flow the reverse path and dispatch against real HA entities.
-- **Waveshare 6.25" display + touch working** via direct framebuffer (`/dev/fb0`, RGB565) + evdev. See `platform/diagnostics/touch_test.py`. Pygame did not work on this setup; production UI will use Vue 3 + Vite + Pinia served via Chromium-kiosk under `cage`.
+- **Waveshare 6.25" display + touch working** in production via sway (Wayland compositor) running cog (WPE WebKit) on tty1. Output rotated 90° via sway's `output * transform 270` to convert the panel's native portrait to landscape; wlroots auto-rotates touch input to match.
+- **Kiosk auto-deploys reliably.** `cut-release` builds and commits the dist/, the Pi pulls on each `panel-bridge.service` start, sway+cog reload, fresh UI is live within seconds. DNS-aware pre-pull, cache-headers static server, and the boot-time resync handshake make cold boots and post-deploy reloads consistent.
 - **Monorepo scaffold landed.** `platform/` (firmware component, bridge, ui-core, ha-integration, deploy, diagnostics) + `panels/feeding_control/` (firmware, ui, ha, manifest). Existing firmware and Pi diagnostics migrated. App entrypoint (`panels/feeding_control/firmware/main/app_main.c`) is now three lines: `panel_platform_init() → panel_app_init() → panel_net_start()`.
 - **Sensors live on the C6, not the Pi.** TEMT6000 ambient on ADC1 CH0 (D0). TF-Mini Plus LiDAR on UART0 routed to D3/D4 (115200). Both are read by `panel_platform`, published to MQTT (`thread_panel/feeding_control/state/{proximity,ambient_brightness}`), and forwarded as JSON lines over UART to the Pi. Originally planned to use MCP3008 ADC on the Pi; pivoted because the C6 has built-in ADC + spare UARTs and the data flow is more direct (no Pi-as-middleman for HA-bound state).
 
@@ -388,7 +392,7 @@ esp_mqtt_client_config_t mqtt_cfg = {
     - Expose `ha_availability` through the `panel` store so product UIs can render loading/offline overlays.
     - Product UIs choose their own UX for the offline state; platform just provides the signal.
 
-12. **Panel-itself entity representation in HA** (in progress — approach chosen, MVP scope done 2026-04-23)
+12. ~~**Panel-itself entity representation in HA**~~ ✅ DONE 2026-04-27 (sensors + screen/wifi/reboot controls + Wi-Fi credential management all landed)
 
     Chosen approach: **Python entity classes inside `custom_components/thread_panel/`**. One device per panel (identified by `panel_id`), entities subscribe to the panel's own MQTT topics, availability gated on the C6's LWT-backed `availability` topic.
 
@@ -437,19 +441,18 @@ esp_mqtt_client_config_t mqtt_cfg = {
 
     **E3 — Mac-side `panel-ota` CLI tool**: lives in `tools/`. Builds firmware, starts `python3 -m http.server` in the build dir, detects Mac's LAN IP via kernel-route trick, publishes `cmd/ota` to `thread_panel/feeding_control/cmd/ota` with the URL, tails the MQTT `availability` topic to watch for the C6's reboot (offline flap then online), shuts down the HTTP server.
 
-14. **`feeding_control` product UI (`panels/feeding_control/ui/`)**
-    - Real UI for the pet feeder: schedule view, feed/skip/toggle controls, panel-itself surfaces (screen, wifi status), offline overlay driven by `ha_availability`.
-    - Built against live data from steps 11/12.
+14. ~~**`feeding_control` product UI (`panels/feeding_control/ui/`)**~~ ✅ DONE 2026-04-28
+    - Vue 3 + Vite + Pinia app with custom Fraunces/Instrument Sans typography, ambient-driven theme switching, and proximity-driven splash. Components: schedule list with per-row skip/un-skip, manual-feed stepper (12 portion steps with reduced-fraction display), status panel (next/last meal, today's totals), alarm banner (food bin / dispenser jam), settings drawer (pause-today, connection state).
     - ~~`platform/ui-core/` extraction~~ ✅ DONE 2026-04-24 as part of cleanup. Platform-shaped code (WS connection + reconnect, snapshot replay, availability, entity-state, `callService`) now lives in `platform/ui-core/src/` and is consumed via the `@thread-panel/ui-core` path alias. Product UIs only carry layout + product-specific behavior.
-    - Panel-itself control owners in the bridge (screen, wifi, reboot) landed in step 11 D2 — UI can call them directly via the existing switch/button entities in HA or the WS `callService` (TBD: product UI decides which route).
-    - Brightness remains deferred — Waveshare display has no software-controllable backlight; revisit in step 16 via Wayland gamma overlay after cage lands.
+    - Build flow: `cut-release` runs `yarn build` for every panel UI before tagging, commits dist/ to git, Pi pulls dist/ on `panel-bridge.service` start. UI source pushes between releases don't update what the kiosk serves until the next `cut-release` — releases are the deploy unit.
+    - Brightness remains deferred — Waveshare display has no software-controllable backlight. V2 if hardware allows.
 
-15. **Enclosure**
+15. **Enclosure** (hardware milestone, not blocking software V1)
     - Shapr3D design
     - P1S print
     - Cable management
 
-16. **Kiosk deployment** (in progress 2026-04-28)
+16. ~~**Kiosk deployment**~~ ✅ DONE 2026-04-28
     - ✅ Bridge systemd unit landed at `platform/deploy/panel-bridge.service` (2026-04-23) — the bridge auto-starts on boot, pulls latest on each start, and restarts on failure.
     - ✅ UI deploy path settled (2026-04-27): build via `yarn build` inside `cut-release`, commit `dist/` to git, Pi pulls dist/ on each `panel-bridge.service` restart. Releases are the deploy unit; UI source pushes between releases don't update what the kiosk serves until the next `cut-release`.
     - ✅ `panel-ui.service` (2026-04-27) — `python3 -m http.server` serving `panels/feeding_control/ui/dist/` on `127.0.0.1:8080`.
@@ -463,11 +466,37 @@ esp_mqtt_client_config_t mqtt_cfg = {
 
 Not blocking V1 ship, but called out so we don't lose them.
 
-- **`install-pi.sh` full bootstrap from a fresh Pi OS Lite.** Currently the script assumes the user has already cloned the repo, set up the bridge venv, and apt-installed cog. Fold all of that in so a brand-new Pi can be brought up with one command. While we're there, fold in the steps from earlier build phases that still live as prose in this doc: `dtoverlay=disable-bt` for PL011 on GPIO 14/15 (step 4), serial-console disable, NetworkManager bring-up, and any other one-time setup. End state: image SD → boot → ssh in → run script → reboot → kiosk runs.
+### Setup & deploy
+
+- **`install-pi.sh` full bootstrap from a fresh Pi OS Lite.** Currently the script assumes the user has already cloned the repo, set up the bridge venv, and apt-installed cog. Fold all of that in so a brand-new Pi can be brought up with one command. While we're there, fold in the steps from earlier build phases that still live as prose in this doc: `dtoverlay=disable-bt` for PL011 on GPIO 14/15 (step 4), serial-console disable, NetworkManager bring-up, and any other one-time setup. End state: image SD → boot → ssh in → run script → reboot → kiosk runs. This should be device agnostic to whatever extent is possible.
 - **Kiosk-renderer choice via flag.** `install-pi.sh --cog` (Pi Zero 2 W, 512 MB) vs `install-pi.sh --cage` (Pi 4+, 1 GB+) so the same script works across hardware. Default to cog on detected ≤768 MB, cage on more. Either path apt-installs the right packages and symlinks the matching unit.
+- **GitHub Action / artifact-based deploy instead of full repo clone.** Today the Pi clones the entire repo (including firmware, integration source, build_plan, etc.) when it only needs the bridge sources, the UI dist/, and the deploy artifacts. CI builds an artifact bundle (bridge + dist/ + deploy/) on each release, the Pi pulls just that. Smaller pulls, no firmware/integration/docs noise on the Pi, easier to reason about what's actually deployed.
+- **Direnv + shell helper cleanup.** Several issues with the current `.envrc` / source aliases (interactive `panel-bridge`, `idf` activation, etc.) — paths, ordering, environment leaks. Audit and fix in one pass. (The user knows the specifics; revisit when we get there.)
+
+### Architecture & abstraction
+
+- **HA integration: replace pure-YAML manifest with a real config flow.** Today the integration's manifest lives in `panels/<id>/ha/manifest.yaml` and gets pasted into the config flow as text. Move to an interactive picker — list installed devices, let the user multi-select entities and per-entity attribute allowlists, store as proper `ConfigEntry.options`. YAML stays as a power-user import path but isn't the default.
+- **Consistent device ↔ Pi ↔ UI/interface association.** Right now the link between an HA Device (per `panel_id` in the integration), a physical Pi (its hostname), and the served UI (hard-coded `panels/feeding_control/ui/dist/`) is implicit and split across three places. Unify under a single concept ("a panel = these three things linked together"). Probably surfaces as a `device/<hostname>.conf` (or per-Pi config in HA) that names: which product UI to serve, which `panel_id` this device claims, and which physical hardware variant (panel size, sensors present). Rolls up the older "device → product binding" item.
 - **"Unconfigured panel" splash in `platform/ui-core`.** When a panel boots without a product UI configured (`panel-ui.service` serving an empty/missing `dist/`, or no panel selected), show a friendly splash with setup instructions instead of a directory listing or blank screen. The splash itself ships as part of ui-core so every panel inherits it for free.
-- **Device → product binding.** Currently `panel-ui.service` and `cog.service` hard-code `panels/feeding_control/ui/dist/`. To support a fleet running different products (feeding_control on one Pi, something else on another), the device needs a way to declare which product it runs. Likely shape: a single config file (e.g. `/etc/thread_panel/device.conf` or a checked-in `device/<hostname>.conf`) that names the product; the systemd units read from it via `EnvironmentFile=`. Couples cleanly with the unconfigured-splash item — when no binding is set, the splash takes over.
-- **Repo reorg to support the above.** Likely lifts more of the kiosk shell (Vue app entry, theme system, splash, presence) into `platform/ui-core/` so panels only carry product-specific surfaces, and introduces a top-level concept (folder or config layer) for "which device runs which product." Tackle this together with the items above — they're all the same shape.
+- **Repo reorg: tighter platform / product separation.** Likely outcome (subject to refinement): only the UI is genuinely product-specific. The current `panels/<id>/firmware/` is mostly platform code with a ~20-line `panel_app.c` shim — that shim could live in `platform/firmware/` driven by config. Same for `panels/<id>/ha/` (manifest only). End state: `panels/<id>/` contains a UI directory and a manifest file, nothing else. Couples with the device-association work above; tackle together.
+
+### Multi-device / fleet
+
+- **NVS-provisioned per-device MQTT credentials.** Currently every device built from this tree shares the credentials baked into `sdkconfig`. Fine for one device. Before scaling to a fleet, switch to a provisioning flow that writes per-device credentials to NVS at first boot (USB serial provisioning tool, BLE captive provisioning, or a Mac-side `panel-provision` CLI). Fix in tandem with the device-association work since both touch device identity.
+- **HACS distribution of `thread_panel` integration.** Currently manual `git clone` into `custom_components/`. HACS-publishing makes it installable from HA's UI like any other community integration. Modest packaging work (HACS manifest, repo structure conformance). Worthwhile if anyone other than us deploys a panel.
+
+### Robustness
+
+- **Tests & CI.** No automated tests anywhere right now. Most useful additions, in rough order: (1) bridge unit tests for the state cache + WS broadcast logic (pytest, minimal mocking); (2) integration tests that the HA `_handle_resync` actually republishes everything (HA test framework supports this); (3) UI component tests on the data-shape parsing in `useFeeder` (Vitest); (4) firmware build verification via GitHub Actions (no hardware in CI, just `idf.py build`); (5) end-to-end smoke test that a fresh Mac + Pi + C6 deploy yields a kiosk with data within N seconds.
+- **MQTT message fragmentation handling on the C6.** We currently rely on `buffer.size = 8 KB` being big enough for any single payload. esp-mqtt actually delivers oversized payloads as multiple `MQTT_EVENT_DATA` callbacks with `current_data_offset` / `total_data_len` set; our `forward_*` helpers just look at the first chunk. Real fix: accumulate fragments in `panel_app_on_data` until `data_len + offset == total_data_len`, then forward. Removes the buffer-tuning band-aid and handles arbitrarily large entity snapshots correctly.
+- **C6 UART rx state machine to ignore boot noise.** Companion to the bridge-side leading-`\n` fix. Currently `panel_uart.c::rx_task` accumulates everything between newlines; if Pi boot noise has no newlines, it sits in the buffer until the bridge's first newline-terminated write flushes it. Cleaner: only start accumulating after seeing `{`, drop bytes that don't fit a JSON-line pattern. Removes the bridge-side workaround.
+- **WPE bubblewrap sandbox proper fix.** `cog.service` currently sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` to bypass Debian's misconfigured bubblewrap. The real fix is `setcap -r /usr/bin/bwrap` (let bwrap fall back to unprivileged userns) plus a check in `install-pi.sh` to re-apply after apt updates of `bubblewrap` clobber the caps. Low priority — sandbox is mostly defense against malicious sites we don't load — but cleaner.
+- **Configurable presence/theme thresholds via HA, not `.env.production`.** Today the splash distance, theme switch points, etc. are baked into the bundle at build time. For tuning on-site without a rebuild, expose them as HA `number` entities the bridge subscribes to and the UI reads from `panel.entity()`. Single-device benefit is "tune without rebuilding"; multi-device benefit is "each Pi has its own settings synced through HA."
+
+### Hardware
+
+- **Brightness control.** Waveshare 6.25" has no software-controllable backlight. If the hardware is swapped or a Wayland gamma overlay turns out to work, revisit and add a `number` entity the cog kiosk reads.
+- **Thread mesh resilience monitoring.** Step 11's "Thread mesh flapping under load" was fixed by switching the C6 to MTD, but we have no ongoing visibility. Surface OpenThread mesh-error counters as a diagnostic sensor in HA so degradation shows up before it manifests as command latency.
 
 ## Technical Debt
 
@@ -485,12 +514,15 @@ Not blocking V1 ship, but called out so we don't lose them.
 - ~~Roster envelope overflow~~ — fixed 2026-04-28. `FORWARD_BUF_SIZE` in [`panel_app.c`](../panels/feeding_control/firmware/main/panel_app.c) was 2048 bytes; with 16 entities the roster JSON is ~2.5 KB and gets truncated by snprintf, leaving the C6 to drop the whole line with a `roster envelope overflow (2529 bytes), dropping` warning. The kiosk works without the roster (entity_ids are hardcoded in the UI's `useFeeder` composable) so this was silent data loss rather than a visible failure. Bumped to 4096 bytes — fits 25+ entity rosters with headroom. If a future panel grows past ~3.5 KB, switch the roster forwarder to heap allocation rather than bumping further (the buffer is allocated on the MQTT task's stack, default 6144 bytes total).
 - ~~UI deploys not picked up by kiosk because WPE caches `index.html` heuristically~~ — fixed 2026-04-28. `python3 -m http.server` (the original `panel-ui.service` ExecStart) sends no `Cache-Control` header, so WPE WebKit falls back to RFC 7234 heuristic caching using `Last-Modified`. Compounding factor: `git pull` preserves the original mtime of files it checks out, so post-`cut-release` deploys arrive on the Pi with the *original Vite-build mtime from the Mac*, not the current time — WPE saw "this file's Last-Modified is the same as last cache" and reused the stale entry. Symptom: every `cut-release` followed by a Pi reboot showed the previous UI until either a manual cache wipe or an mtime-touching edit. Fix: replaced the built-in `http.server` with [`panel-ui-server.py`](../platform/deploy/panel-ui-server.py), a 30-line subclass that sends `Cache-Control: no-cache, no-store, must-revalidate` for `index.html` and `Cache-Control: public, max-age=31536000, immutable` for everything else (Vite's hash-named JS/CSS/font files are content-addressed and safe to cache forever). `panel-ui.service` updated to invoke the new server. Also discovered along the way: WPE's actual cache directories are `~/.cache/wpe/` and `~/.local/share/wpe/`, not `~/.cache/wpe-webkit/` as I'd guessed — earlier "clear the cache" instructions were inadvertently no-ops.
 
-### Outstanding
+### Outstanding (V2)
 
-- MQTT credentials in sdkconfig (plaintext) — keep sdkconfig out of version control. Move to NVS provisioning eventually, especially if scaling to multiple devices that should have distinct identities.
-- Schedule data shape is deferred to whatever PetLibro's HA entity exposes as attributes — the manifest allowlist bounds what gets forwarded, but the UI still has to decode whatever shape HA hands us. Nail down when writing the product UI's schedule view.
-- AdGuard's listen-interface scan happens at startup — adding new IPv6 addresses to HA after AdGuard is running requires an AdGuard restart for it to bind to the new address. Worth knowing if the static ULA is ever reassigned.
+- MQTT credentials in sdkconfig (plaintext) — fine for V1's single device. `sdkconfig` is gitignored so they're not exposed, but every device built from this tree gets identical credentials. Move to NVS-provisioned per-device credentials before deploying a fleet.
+
+### Operational notes (not debt, just things to remember)
+
+- AdGuard's listen-interface scan happens at startup — adding new IPv6 addresses to HA after AdGuard is running requires an AdGuard restart for it to bind to the new address. Relevant if the static ULA is ever reassigned.
 - C6 has no persistent state beyond the Thread dataset and build-time sdkconfig. If/when runtime-mutable state appears (per-panel identity, last-known-values across reboots, user-editable config), prefer stashing it on the Pi's SD card via a UART blob-store protocol over writing to C6 NVS — SD endurance beats ESP32 flash for frequent writes, and the Pi already has a filesystem. Not needed for anything currently planned.
+- WS connections in the bridge journal show LAN IPs (192.168.50.x) rather than 127.0.0.1, suggesting cog reaches the WS server through the Pi's LAN interface rather than loopback. Functional, but means a WiFi blip *could* drop the connection unnecessarily. If WS hiccups appear in the future, look at this first — fix is making sure the kiosk's bundled WS URL is `ws://localhost:8765` (which it should already be by default).
 
 ## Lessons Learned (Step 2)
 

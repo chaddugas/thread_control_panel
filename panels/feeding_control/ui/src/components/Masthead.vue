@@ -58,20 +58,20 @@ const clockLine = computed(() => {
 .masthead {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.65rem;
   line-height: 1;
 }
 
 .meta {
   display: inline-flex;
   align-items: baseline;
-  gap: 0.55rem;
+  gap: 0.7rem;
   white-space: nowrap;
 }
 
 .date {
   font-family: var(--body);
-  font-size: 0.72rem;
+  font-size: 0.88rem;
   font-weight: 500;
   letter-spacing: 0.28em;
   color: var(--cream-muted);
@@ -79,13 +79,13 @@ const clockLine = computed(() => {
 
 .bullet {
   font-family: var(--display);
-  font-size: 0.85rem;
+  font-size: 1rem;
   color: var(--brass);
   transform: translateY(-1px);
 }
 
 .clock {
-  font-size: 0.95rem;
+  font-size: 1.15rem;
   color: var(--cream-soft);
   letter-spacing: 0.01em;
   font-feature-settings: "lnum", "tnum";

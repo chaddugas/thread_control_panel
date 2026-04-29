@@ -15,9 +15,10 @@
     <button
       class="head"
       type="button"
-      :tabindex="open ? -1 : 0"
+      :tabindex="open || isLocked ? -1 : 0"
       :aria-hidden="open ? 'true' : undefined"
-      @click="$emit('toggle')"
+      :disabled="isLocked"
+      @click="onHeadClick"
     >
       <span class="marker">
         <span class="lozenge" />
@@ -72,7 +73,7 @@ const props = defineProps<{
   open?: boolean;
   rowIndex?: number;
 }>();
-defineEmits<{
+const emit = defineEmits<{
   (e: "toggle"): void;
   (e: "close"): void;
   (e: "skip", plan: Plan): void;
@@ -102,6 +103,13 @@ const stateLabel = computed(() => {
   if (props.plan.feed_state === "Skipped") return "skipped";
   return "";
 });
+
+const isLocked = computed(() => props.plan.feed_state === "Completed");
+
+function onHeadClick(): void {
+  if (isLocked.value) return;
+  emit("toggle");
+}
 </script>
 
 <style scoped>
@@ -112,9 +120,6 @@ const stateLabel = computed(() => {
   transition: background 220ms ease;
 }
 
-.row.open {
-  background: var(--row-active);
-}
 
 .head {
   display: grid;
@@ -128,14 +133,11 @@ const stateLabel = computed(() => {
   text-align: left;
   cursor: pointer;
   color: inherit;
-  transition:
-    opacity 220ms ease,
-    filter 220ms ease;
+  transition: opacity 240ms ease;
 }
 
 .row.open .head {
-  opacity: 0.18;
-  filter: blur(2px);
+  opacity: 0;
   pointer-events: none;
 }
 
@@ -260,6 +262,10 @@ const stateLabel = computed(() => {
   color: var(--brass);
 }
 
+.row.served .head {
+  cursor: default;
+}
+
 .row.served .time,
 .row.served .qty,
 .row.served .meridiem,
@@ -281,13 +287,13 @@ const stateLabel = computed(() => {
   position: absolute;
   inset: 0;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: stretch;
-  gap: 0.6rem;
-  padding: 0.5rem 1rem;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 220ms ease;
+  transition: opacity 240ms ease;
 }
 
 .row.open .actions {
@@ -297,47 +303,41 @@ const stateLabel = computed(() => {
 
 .action {
   flex: 1;
-  height: 100%;
   padding: 0 1rem;
-  background: var(--row-active);
+  background: transparent;
   border: 1px solid var(--hairline-strong);
-  border-radius: 4px;
+  border-radius: 6px;
   color: var(--cream);
   font-family: var(--display);
   font-style: italic;
-  font-variation-settings: "opsz" 14, "SOFT" 70, "WONK" 1;
-  font-size: 1rem;
+  font-variation-settings: "opsz" 14, "SOFT" 60, "WONK" 1;
+  font-size: 1.15rem;
+  font-weight: 380;
+  letter-spacing: 0.005em;
   cursor: pointer;
-  transform: translateY(6px);
-  transition-property: border-color, color, transform;
-  transition-duration: 160ms, 160ms, 360ms;
-  transition-timing-function: ease, ease, cubic-bezier(0.32, 0.05, 0.2, 1);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
 }
 
-.row.open .action {
-  transform: translateY(0);
-}
-
-.row.open .action.skip {
-  transition-delay: 0ms, 0ms, 70ms;
-}
-
-.row.open .action.unskip {
-  transition-delay: 0ms, 0ms, 130ms;
-}
-
-.action.skip:hover:not(:disabled) {
+.action.skip:not(:disabled) {
   border-color: var(--brass-veil-strong);
   color: var(--brass);
 }
 
-.action.unskip:hover:not(:disabled) {
-  border-color: rgba(147, 167, 145, 0.32);
+.action.unskip:not(:disabled) {
+  border-color: rgba(147, 167, 145, 0.45);
   color: var(--sage);
 }
 
+.action:hover:not(:disabled),
+.action:active:not(:disabled) {
+  background: var(--row-active);
+}
+
 .action:disabled {
-  opacity: 0.32;
+  opacity: 0.28;
   cursor: not-allowed;
 }
 </style>

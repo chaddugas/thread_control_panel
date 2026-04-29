@@ -36,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, provide, ref } from "vue";
 import { usePanelStore } from "@thread-panel/ui-core";
 import { useTheme } from "@/composables/useTheme";
 import { usePresence } from "@/composables/usePresence";
@@ -53,6 +53,7 @@ const settingsOpen = ref(false);
 
 useTheme();
 const { showSplash } = usePresence();
+provide("showSplash", showSplash);
 
 onMounted(() => panel.connect());
 onUnmounted(() => panel.disconnect());

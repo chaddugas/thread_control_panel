@@ -41,7 +41,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, inject, ref, watch, type Ref } from "vue";
 import { useFeeder } from "@/composables/useFeeder";
 import { formatTwelfths } from "@/utils/fractions";
 import Ticker from "./Ticker.vue";
@@ -87,8 +87,21 @@ function next(): void {
 
 function feed(): void {
   const opt = options.value[idx.value];
-  if (opt) feeder.manualFeed(opt);
+  if (!opt) return;
+  feeder.manualFeed(opt);
+  resetToDefault("down");
 }
+
+function resetToDefault(direction: "up" | "down" = "up"): void {
+  if (idx.value === 0) return;
+  lastDirection.value = direction;
+  idx.value = 0;
+}
+
+const showSplash = inject<Ref<boolean>>("showSplash", ref(false));
+watch(showSplash, (now, prev) => {
+  if (now && !prev) resetToDefault();
+});
 </script>
 
 <style scoped>

@@ -120,7 +120,13 @@ watch(
  * capture so this fires before per-row toggles — taps inside the
  * currently-open row (its action buttons or dimmed face) are ignored
  * and reset the auto-close timer so a touched row stays alive.
+ *
+ * If the outside tap lands on a different row's tap target, we set a
+ * one-shot "swallow" flag so the resulting click event is suppressed
+ * — the gesture closes the current row but does not open a second one.
  */
+let swallowNextClick = false;
+
 function onDocumentPointerDown(ev: PointerEvent): void {
   if (openKey.value === null) return;
   const target = ev.target as Element | null;
@@ -131,18 +137,30 @@ function onDocumentPointerDown(ev: PointerEvent): void {
     return;
   }
   openKey.value = null;
+  if (target.closest('[data-row-key]')) {
+    swallowNextClick = true;
+  }
+}
+
+function onDocumentClick(ev: MouseEvent): void {
+  if (!swallowNextClick) return;
+  swallowNextClick = false;
+  ev.stopPropagation();
+  ev.preventDefault();
 }
 
 onMounted(() => {
   document.addEventListener('pointerdown', onDocumentPointerDown, {
     capture: true,
   });
+  document.addEventListener('click', onDocumentClick, { capture: true });
 });
 
 onUnmounted(() => {
   document.removeEventListener('pointerdown', onDocumentPointerDown, {
     capture: true,
   });
+  document.removeEventListener('click', onDocumentClick, { capture: true });
   clearAutoClose();
 });
 </script>
