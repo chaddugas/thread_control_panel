@@ -19,6 +19,7 @@
         :key="plan.key"
         :plan="plan"
         :is-next="plan.planID === nextPlanId"
+        :is-missed="missedKeys.has(plan.key)"
         :open="openKey === plan.key"
         :row-index="i"
         @toggle="onToggle(plan.key)"
@@ -48,6 +49,30 @@ const enabled = feeder.scheduleEnabled;
 const nextPlanId = computed(() => feeder.status.value.nextPlanId);
 
 const openKey = ref<string | null>(null);
+
+/**
+ * "Missed" plans are still Pending in the schedule but their scheduled
+ * time has already passed today — typically because the device didn't
+ * pick up an explicit skip, or the user just never served the plate.
+ * We tick `now` once a minute so rows can re-evaluate their state as the
+ * day progresses.
+ */
+const now = ref(new Date());
+let nowTimer: number | null = null;
+
+const missedKeys = computed(() => {
+  const set = new Set<string>();
+  const today = now.value;
+  for (const plan of plans.value) {
+    if (plan.feed_state !== 'Pending') continue;
+    const [h, m] = plan.time.split(':').map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m)) continue;
+    const t = new Date(today);
+    t.setHours(h, m, 0, 0);
+    if (t.getTime() < today.getTime()) set.add(plan.key);
+  }
+  return set;
+});
 
 const AUTO_CLOSE_MS = 10_000;
 let autoCloseTimer: number | null = null;
@@ -154,6 +179,9 @@ onMounted(() => {
     capture: true,
   });
   document.addEventListener('click', onDocumentClick, { capture: true });
+  nowTimer = window.setInterval(() => {
+    now.value = new Date();
+  }, 30_000);
 });
 
 onUnmounted(() => {
@@ -162,6 +190,10 @@ onUnmounted(() => {
   });
   document.removeEventListener('click', onDocumentClick, { capture: true });
   clearAutoClose();
+  if (nowTimer !== null) {
+    window.clearInterval(nowTimer);
+    nowTimer = null;
+  }
 });
 </script>
 

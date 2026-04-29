@@ -7,6 +7,7 @@
       {
         open,
         next: isNext,
+        missed: isMissed,
         skipped: plan.feed_state === 'Skipped',
         served: plan.feed_state === 'Completed',
       },
@@ -70,6 +71,7 @@ import Ticker from "./Ticker.vue";
 const props = defineProps<{
   plan: Plan;
   isNext?: boolean;
+  isMissed?: boolean;
   open?: boolean;
   rowIndex?: number;
 }>();
@@ -100,11 +102,14 @@ const meridiem = computed(() => parsed.value?.ampm ?? "");
 const stateLabel = computed(() => {
   if (props.plan.feed_state === "Skipped") return "skipped";
   if (props.plan.feed_state === "Completed") return "served";
+  if (props.isMissed) return "missed";
   if (props.isNext) return "next";
   return "";
 });
 
-const isLocked = computed(() => props.plan.feed_state === "Completed");
+const isLocked = computed(
+  () => props.plan.feed_state === "Completed" || props.isMissed === true,
+);
 
 function onHeadClick(): void {
   if (isLocked.value) return;
@@ -262,14 +267,19 @@ function onHeadClick(): void {
   color: var(--brass);
 }
 
-.row.served .head {
+.row.served .head,
+.row.missed .head {
   cursor: default;
 }
 
 .row.served .time,
 .row.served .qty,
 .row.served .meridiem,
-.row.served .unit {
+.row.served .unit,
+.row.missed .time,
+.row.missed .qty,
+.row.missed .meridiem,
+.row.missed .unit {
   color: var(--cream-muted);
 }
 
