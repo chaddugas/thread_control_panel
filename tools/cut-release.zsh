@@ -346,6 +346,19 @@ PY
     --exclude='.venv' \
     panel_bridge pyproject.toml README.md test_client.py || return 1
 
+  # Deploy tarball — systemd units + runner scripts + sway config. Extracted
+  # to /opt/panel/versions/<v>/deploy/ on the Pi; install-pi.sh renders units
+  # from there. install-pi.sh itself is shipped loose at the release root
+  # (chicken-and-egg: it has to be downloadable before any version exists),
+  # so it's excluded here.
+  print ""
+  print "→ panel-deploy..."
+  tar -czf "$staging/panel-deploy-${bare_version}.tar.gz" \
+    -C "$repo_root/platform/deploy" \
+    --exclude='install-pi.sh' \
+    --exclude='README.md' \
+    . || return 1
+
   # Integration zip — content_in_root: false in hacs.json, so the zip
   # contains a thread_panel/ directory at root.
   print ""
@@ -353,6 +366,13 @@ PY
   ( cd "$repo_root/platform/integration" && \
     zip -qr "$staging/thread_panel-${bare_version}.zip" thread_panel \
       -x '*/__pycache__/*' '*.pyc' ) || return 1
+
+  # install-pi.sh shipped loose at the release root for `curl -L
+  # .../releases/latest/download/install-pi.sh | bash` bootstrap.
+  print ""
+  print "→ install-pi.sh..."
+  cp "$repo_root/platform/deploy/install-pi.sh" "$staging/install-pi.sh" || return 1
+  chmod +x "$staging/install-pi.sh"
 
   # ----- manifest.json -----
   print ""
@@ -381,8 +401,13 @@ for f in sorted(sd.iterdir()):
         continue
     name = f.name
     # Per-panel: <panel_id>-firmware-<v>.bin or <panel_id>-ui-<v>.tar.gz
+    if name == "install-pi.sh":
+        # Loose bootstrap, not a versioned component — skip
+        continue
     if name.startswith("panel-bridge-"):
         components["bridge"] = meta(f)
+    elif name.startswith("panel-deploy-"):
+        components["deploy"] = meta(f)
     elif name.startswith("thread_panel-"):
         components["integration"] = meta(f)
     elif "-firmware-" in name:
@@ -436,7 +461,9 @@ PY
   print "Publishing release..."
   local gh_args=("$new_version" "--title" "$new_version" "--notes-file" "$notes_file")
   (( is_prerelease )) && gh_args+=("--prerelease")
-  gh release create "${gh_args[@]}" "$staging"/*.bin "$staging"/*.tar.gz "$staging"/*.zip "$staging/manifest.json" || {
+  gh release create "${gh_args[@]}" \
+    "$staging"/*.bin "$staging"/*.tar.gz "$staging"/*.zip \
+    "$staging/manifest.json" "$staging/install-pi.sh" || {
     print -u2 "cut-release: gh release create failed."
     print -u2 "  Tag was pushed; artifacts are in $staging/."
     print -u2 "  Fix the issue and retry: gh release create ${(j: :)gh_args} \"$staging\"/*"

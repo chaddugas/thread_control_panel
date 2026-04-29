@@ -8,8 +8,9 @@ After=getty@tty1.service
 
 [Service]
 Type=simple
-# Replace `pi` with your Pi username if different. The user must be in the
-# video, input, and render groups (install-pi.sh handles this).
+# install-pi.sh templates this; tracked source uses `pi` as the placeholder.
+# The rendered user must be in the video, input, and render groups (install-pi.sh
+# handles that too).
 User=pi
 PAMName=login
 TTYPath=/dev/tty1
@@ -53,7 +54,7 @@ Environment=WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
 ExecStartPre=-/usr/bin/pkill -9 -x cog
 ExecStartPre=-/usr/bin/pkill -9 -x sway
 
-ExecStart=/usr/bin/sway -c /home/pi/thread_control_panel/platform/deploy/sway-kiosk.config
+ExecStart=/usr/bin/sway -c /opt/panel/current/deploy/sway-kiosk.config
 
 Restart=always
 RestartSec=2s

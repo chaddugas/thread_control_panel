@@ -54,7 +54,8 @@ panels/feeding_control/         # first product
 | Task | From | Command |
 |---|---|---|
 | Build/flash firmware | Mac | `cd panels/feeding_control/firmware && idf && idf.py build flash monitor` |
-| Run bridge on Pi | Pi | `panel-bridge` (defined in user's `~/.bashrc` — pulls, syncs deps, starts) |
+| Install/upgrade panel | Pi | `curl -sSL https://github.com/chaddugas/thread_control_panel/releases/latest/download/install-pi.sh \| bash` (or pass a specific version) |
+| Run bridge foreground | Pi | `sudo systemctl stop panel-bridge && cd /opt/panel/current/bridge && .venv/bin/python -m panel_bridge` (Ctrl-C to stop, then `sudo systemctl start panel-bridge`) |
 | Bridge smoke test | Pi or Mac | `python test_client.py [ws://host:8765]` |
 | Run UI dev server | Mac | `cd panels/feeding_control/ui && yarn dev` |
 | Type-check UI | Mac | `cd panels/feeding_control/ui && yarn type-check` |

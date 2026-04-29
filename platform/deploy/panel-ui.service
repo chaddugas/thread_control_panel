@@ -1,19 +1,19 @@
 [Unit]
-Description=feeding_control UI — static file server for the kiosk
+Description=Panel UI — static file server for the kiosk
 Documentation=https://github.com/chaddugas/thread_control_panel
 After=network.target
 
 [Service]
 Type=simple
-# Replace `pi` with your Pi username if different.
+# install-pi.sh templates this; tracked source uses `pi` as the placeholder.
 User=pi
 # Custom static server (panel-ui-server.py) instead of `python3 -m http.server`
 # so we can send proper cache headers: `no-cache` for index.html (so deploys
 # land immediately) and `immutable` for Vite's hash-named assets (so they
 # don't get re-downloaded every load). With plain http.server, WPE/cog
 # would heuristic-cache index.html and ignore new dist/ contents.
-WorkingDirectory=/home/pi/thread_control_panel/panels/feeding_control/ui/dist
-ExecStart=/usr/bin/python3 /home/pi/thread_control_panel/platform/deploy/panel-ui-server.py 8080 127.0.0.1
+WorkingDirectory=/opt/panel/current/ui-dist
+ExecStart=/usr/bin/python3 /opt/panel/current/deploy/panel-ui-server.py 8080 127.0.0.1
 Restart=on-failure
 RestartSec=5s
 

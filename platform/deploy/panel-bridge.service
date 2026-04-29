@@ -1,21 +1,15 @@
 [Unit]
 Description=Panel bridge (WebSocket ↔ UART)
 Documentation=https://github.com/chaddugas/thread_control_panel
-After=network-online.target
-Wants=network-online.target
+After=network.target
 
 [Service]
 Type=simple
-# Replace `pi` with your Pi username if different.
+# install-pi.sh templates this; tracked source uses `pi` as the placeholder.
 User=pi
-# Minimal default PATH doesn't include git. Extend it so the runner script
-# can find git, touch, etc. without hardcoding absolute paths.
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
-# Python logs should land in the journal in real time, not buffered.
+# Python logs land in the journal in real time, not buffered.
 Environment=PYTHONUNBUFFERED=1
-# Absolute path — systemd doesn't expand ~ in unit files. Replace if the
-# repo lives somewhere other than $HOME/thread_control_panel.
-ExecStart=/home/pi/thread_control_panel/platform/deploy/panel-bridge.sh
+ExecStart=/opt/panel/current/deploy/panel-bridge.sh
 Restart=on-failure
 RestartSec=5s
 

@@ -73,4 +73,4 @@ What you should see:
 
 ## Production
 
-A systemd unit lives in `../deploy/panel-bridge.service` and starts the bridge on boot. (TBD — added during step 15.)
+The bridge runs under [`../deploy/panel-bridge.service`](../deploy/panel-bridge.service) on the Pi, installed by [`../deploy/install-pi.sh`](../deploy/install-pi.sh). On the Pi it lives at `/opt/panel/current/bridge/` (V2 artifact-based install). See [`../deploy/README.md`](../deploy/README.md) for the install/upgrade flow.
