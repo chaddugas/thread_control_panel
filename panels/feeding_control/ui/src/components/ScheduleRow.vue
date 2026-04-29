@@ -191,7 +191,7 @@ const stateLabel = computed(() => {
 }
 
 .hour {
-  font-size: clamp(1.85rem, 3vw, 2.4rem);
+  font-size: clamp(1.85rem, 3.6vw, 2.6rem);
   font-weight: 360;
   letter-spacing: -0.01em;
   line-height: 1;

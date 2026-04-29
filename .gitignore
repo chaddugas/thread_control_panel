@@ -32,6 +32,10 @@ venv/
 # direnv cache
 .direnv/
 
+# Playwright MCP artifacts (Claude-driven browser sessions during dev;
+# screenshots, snapshots, and console logs — never commit)
+.playwright-mcp/
+
 # OS / editor
 .DS_Store
 .idea/

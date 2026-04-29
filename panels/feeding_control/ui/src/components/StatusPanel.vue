@@ -186,7 +186,7 @@ const relativeLine = computed(() => {
 }
 
 .hour {
-  font-size: clamp(3.2rem, 5vw, 4.6rem);
+  font-size: clamp(3.6rem, 6vw, 5.4rem);
   font-weight: 340;
 }
 
@@ -260,7 +260,7 @@ const relativeLine = computed(() => {
 }
 
 .hour-sm {
-  font-size: 1.25rem;
+  font-size: 1.55rem;
   font-variation-settings: "opsz" 60, "SOFT" 30, "WONK" 1;
   letter-spacing: -0.005em;
 }

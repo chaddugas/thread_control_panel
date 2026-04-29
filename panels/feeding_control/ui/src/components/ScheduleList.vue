@@ -4,7 +4,7 @@
     :class="{ 'is-paused': !enabled }"
   >
     <header class="head">
-      <span class="eyebrow">The day's plates TEST TEST TEST</span>
+      <span class="eyebrow">The day's plates</span>
       <Transition name="paused">
         <span
           v-if="!enabled"
@@ -198,8 +198,7 @@ onUnmounted(() => {
   flex-direction: column;
   justify-content: space-around;
   gap: 0.5rem;
-  overflow-y: auto;
-  scroll-behavior: smooth;
+  overflow: hidden;
   transition: opacity 380ms ease;
 }
 

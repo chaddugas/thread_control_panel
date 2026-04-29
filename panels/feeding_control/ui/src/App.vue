@@ -105,8 +105,11 @@ onUnmounted(() => panel.disconnect());
 .settings {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.32rem;
-  padding: 0.85rem 0.95rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  padding: 0;
   background: transparent;
   border: 1px solid var(--hairline-strong);
   border-radius: 999px;
@@ -122,8 +125,8 @@ onUnmounted(() => panel.disconnect());
 }
 
 .dot {
-  width: 4px;
-  height: 4px;
+  width: 6px;
+  height: 6px;
   border-radius: 999px;
   background: var(--cream-soft);
 }

@@ -21,22 +21,35 @@ if [ ! -d "$BRIDGE_DIR/.venv" ]; then
     exit 1
 fi
 
-echo "→ Pulling latest..."
 # network-online.target on NetworkManager can fire before DNS is actually
-# usable, so a fresh boot's first `git pull` often hits "Could not resolve
-# hostname github.com". Retry a few times with short sleeps before giving
-# up — by then either DNS is up or the network really is unavailable.
-PULL_OK=0
-for attempt in 1 2 3 4 5; do
-    if git -C "$REPO_DIR" pull --ff-only; then
-        PULL_OK=1
+# usable, so a fresh boot's first `git pull` would hit "Could not resolve
+# hostname github.com". The previous version of this script retried the
+# pull itself 5 × 5s; that was sometimes still too short. Now we explicitly
+# wait for DNS resolvability of github.com before attempting the pull.
+# `getent hosts` uses the system NSS resolver, the same path git would
+# take, so a successful lookup means git's about to succeed too.
+#
+# Bounded at ~60s. If the Pi is genuinely offline (production deploys with
+# WiFi disabled) we skip the pull entirely and start the bridge with
+# whatever code is already on disk — not a failure, just running stale.
+echo "→ Waiting for DNS to resolve github.com..."
+DNS_OK=0
+for attempt in $(seq 1 30); do
+    if getent hosts github.com >/dev/null 2>&1; then
+        DNS_OK=1
+        echo "→ DNS resolvable (after ${attempt} attempt$([ "$attempt" = "1" ] || echo s))"
         break
     fi
-    echo "panel-bridge: git pull attempt $attempt failed, retrying in 5s..." >&2
-    sleep 5
+    sleep 2
 done
-if [ "$PULL_OK" -eq 0 ]; then
-    echo "panel-bridge: git pull failed after retries — continuing with current checkout" >&2
+
+if [ "$DNS_OK" -eq 0 ]; then
+    echo "panel-bridge: DNS for github.com still not resolvable after 60s — skipping pull, starting bridge with current checkout" >&2
+else
+    echo "→ Pulling latest..."
+    if ! git -C "$REPO_DIR" pull --ff-only; then
+        echo "panel-bridge: git pull failed (auth? merge conflict?) — continuing with current checkout" >&2
+    fi
 fi
 
 if [ ! -f "$MARKER" ] || [ "$BRIDGE_DIR/pyproject.toml" -nt "$MARKER" ]; then

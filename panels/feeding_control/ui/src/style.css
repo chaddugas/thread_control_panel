@@ -82,7 +82,7 @@
  * reading. Normal-aspect dev browsers stay at 16px. */
 @media (min-width: 1500px) and (min-aspect-ratio: 2 / 1) {
   :root {
-    font-size: 20px;
+    font-size: 24px;
   }
 }
 

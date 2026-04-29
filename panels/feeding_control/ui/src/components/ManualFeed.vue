@@ -1,5 +1,13 @@
 <template>
   <section class="manual-feed">
+    <button
+      class="feed-btn"
+      type="button"
+      :disabled="!options.length"
+      @click="feed"
+    >
+      <span class="label">Feed now</span>
+    </button>
     <div class="stepper">
       <button
         class="step"
@@ -29,18 +37,6 @@
         <span class="sign">&plus;</span>
       </button>
     </div>
-    <button
-      class="feed-btn"
-      type="button"
-      :disabled="!options.length"
-      @click="feed"
-    >
-      <span class="label">Feed now</span>
-      <span
-        class="ornament"
-        aria-hidden="true"
-      >&#x276F;</span>
-    </button>
   </section>
 </template>
 
@@ -113,8 +109,8 @@ function feed(): void {
 }
 
 .step {
-  width: 2.6rem;
-  height: 2.6rem;
+  width: 3rem;
+  height: 3rem;
   border-radius: 999px;
   border: 0;
   background: transparent;
@@ -178,16 +174,16 @@ function feed(): void {
 .feed-btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.65rem;
-  padding: 0 1.4rem;
-  height: 3.1rem;
+  justify-content: center;
+  padding: 0 1.6rem;
+  height: 3.5rem;
   background: var(--brass);
   border: 0;
   border-radius: 999px;
   color: var(--feed-button-fg);
   font-family: var(--display);
   font-variation-settings: "opsz" 14, "SOFT" 50, "WONK" 1;
-  font-size: 1.05rem;
+  font-size: 1.1rem;
   font-weight: 460;
   letter-spacing: 0.005em;
   cursor: pointer;
@@ -215,11 +211,4 @@ function feed(): void {
   box-shadow: none;
 }
 
-.ornament {
-  font-family: var(--display);
-  font-variation-settings: "opsz" 14, "SOFT" 100, "WONK" 1;
-  font-size: 0.9rem;
-  letter-spacing: 0.02em;
-  opacity: 0.7;
-}
 </style>
