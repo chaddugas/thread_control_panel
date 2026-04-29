@@ -1,13 +1,19 @@
 """Async UART reader/writer. Parses incoming '\\n'-terminated JSON lines
 from the C6 and emits dicts via a callback. Outgoing messages are written
-as JSON lines back to the same port."""
+as JSON lines back to the same port.
+
+Also exposes an `ota_session()` context manager that the OTA driver uses
+to drive the wire protocol — pauses normal `ota_*` message routing and
+exposes raw write + baud-switch primitives the rest of the bridge doesn't
+need."""
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
-from typing import Awaitable, Callable
+from typing import AsyncIterator, Awaitable, Callable
 
 import serial
 import serial_asyncio
@@ -35,6 +41,10 @@ class UartLink:
         # race (Pi UART not ready when C6 first subscribed to MQTT).
         self._on_link_up = on_link_up
         self._writer: asyncio.StreamWriter | None = None
+        # When non-None, incoming `ota_*` messages get routed to this
+        # queue instead of the normal on_message callback. Set by an
+        # active OtaSession; cleared on session exit.
+        self._ota_queue: asyncio.Queue[dict] | None = None
 
     async def run(self) -> None:
         """Connect and read forever. Reconnects on UART error after 1s backoff."""
@@ -81,6 +91,17 @@ class UartLink:
             if not isinstance(msg, dict):
                 log.debug("non-object JSON: %r", text)
                 continue
+            # Route ota_* types to the active OTA session if any. Other
+            # messages (sensor, panel_state, entity_state, etc.) keep
+            # flowing to the normal handler — UI clients still get them.
+            mtype = msg.get("type")
+            if (
+                self._ota_queue is not None
+                and isinstance(mtype, str)
+                and mtype.startswith("ota_")
+            ):
+                await self._ota_queue.put(msg)
+                continue
             try:
                 await self._on_message(msg)
             except Exception:
@@ -111,3 +132,75 @@ class UartLink:
             log.warning("UART write error: %s", e)
             return False
         return True
+
+    # ----- OTA primitives -----
+
+    async def write_raw(self, data: bytes) -> None:
+        """Write raw bytes (no framing, no leading newline). Used during
+        OTA after raw mode + high baud has been negotiated. Raises if the
+        link is down — OTA can't recover from that mid-transfer."""
+        if self._writer is None:
+            raise RuntimeError("UART link down")
+        self._writer.write(data)
+        await self._writer.drain()
+
+    def set_baud(self, baud: int) -> None:
+        """Reconfigure the serial port's baud rate at runtime. Used during
+        OTA to switch between steady-state 115200 and the OTA transfer's
+        921600. Both peers must change in lockstep — there's no in-band
+        handshake once one side has switched."""
+        if self._writer is None:
+            raise RuntimeError("UART link down")
+        # serial_asyncio's writer.transport.serial is the underlying
+        # pyserial Serial object; setting .baudrate reconfigures live.
+        self._writer.transport.serial.baudrate = baud
+        self._baud = baud
+        log.info("UART baud → %d", baud)
+
+    @contextlib.asynccontextmanager
+    async def ota_session(self) -> AsyncIterator["OtaSession"]:
+        """Acquire the link for an OTA. Routes incoming `ota_*` messages
+        into the session's queue; other messages keep flowing through the
+        normal handler so UI clients still see sensor / state updates.
+        Idempotent guard: only one session at a time."""
+        if self._ota_queue is not None:
+            raise RuntimeError("OTA session already active")
+        queue: asyncio.Queue[dict] = asyncio.Queue()
+        self._ota_queue = queue
+        try:
+            yield OtaSession(self, queue)
+        finally:
+            self._ota_queue = None
+
+
+class OtaSession:
+    """Thin wrapper around UartLink for the OTA driver. Hides the queue
+    and exposes a recv_json that filters by expected message type."""
+
+    def __init__(self, link: "UartLink", queue: asyncio.Queue[dict]) -> None:
+        self._link = link
+        self._queue = queue
+
+    async def send_json(self, msg: dict) -> bool:
+        return await self._link.send(msg)
+
+    async def recv_json(self, expected_type: str, timeout: float) -> dict:
+        """Wait for an ota_* message of the given type. Other ota_* types
+        are logged and skipped (shouldn't happen; defensive). Raises
+        asyncio.TimeoutError on timeout."""
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError(f"timeout waiting for {expected_type}")
+            msg = await asyncio.wait_for(self._queue.get(), timeout=remaining)
+            if msg.get("type") == expected_type:
+                return msg
+            log.warning("OTA: ignored unexpected message: %s", msg)
+
+    async def write_raw(self, data: bytes) -> None:
+        await self._link.write_raw(data)
+
+    def set_baud(self, baud: int) -> None:
+        self._link.set_baud(baud)

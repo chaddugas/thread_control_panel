@@ -196,14 +196,19 @@ Simplifications vs. the original sketch:
 - `panel_app.c` wires the OTA dispatcher (handled before the ha_availability gate so OTA works during HA outages), publishes `state/version` retained on each MQTT connect, and gates every UART forward through `forward_to_pi_uart()` which drops sends while OTA is active.
 - `mbedtls` added to `panel_platform/CMakeLists.txt` PRIV_REQUIRES for sha256.
 
-### Pi additions (in `platform/bridge/`)
+### Pi additions (`platform/bridge/`, chunk 2b)
 
-- New module: `panel_bridge/ota.py` — `send_firmware(bin_path)` reads bin, computes sha256, runs the protocol against the bridge's existing UART link.
-- New CLI: `panel-flash` exposes this for manual use during Phase 2 (`panel-flash /opt/panel/current/firmware.bin`).
+- `panel_bridge/ota.py` — `run_ota(uart, broadcast, bin_path)` reads the bin, computes sha256, drives the wire protocol via an `OtaSession` from `uart_link`. Emits `ota_status` and `ota_progress` envelopes via the broadcast hook so connected clients (and Phase 3's HA `update.panel_firmware`) can show progress.
+- `panel_bridge/uart_link.py` extended:
+  - `ota_session()` async context manager — routes incoming `ota_*` messages into a dedicated queue (other types keep flowing through the normal handler so UI clients still see sensors / state). Idempotent guard prevents concurrent OTA sessions.
+  - `OtaSession.recv_json(expected_type, timeout)` — async wait-for-typed-message.
+  - `write_raw(bytes)` and `set_baud(int)` — primitives the OTA driver needs; not exposed beyond the session.
+- `panel_bridge/__main__.py` dispatches `{"type":"ota_request","path":"…"}` from any WS client by spawning `run_ota` as a detached task. The bridge reads the bin from disk — the binary doesn't traverse WS.
+- `panel_bridge/cli/panel_flash.py` + `pyproject.toml` console script — `panel-flash [path]` connects to the bridge, sends `ota_request`, prints status + progress until complete/failed. Defaults to `/opt/panel/current/firmware.bin` and `ws://localhost:8765`.
 
 ### Validation
 
-- `panel-flash /opt/panel/current/firmware.bin` flashes the C6, reboots, version topic reports new version.
+- `panel-flash /opt/panel/current/firmware.bin` on the Pi flashes the C6, reboots, version topic reports the new value.
 - Rollback: intentionally break new firmware (e.g., kill MQTT in startup before mark-valid), confirm bootloader reverts on next reset.
 
 ---

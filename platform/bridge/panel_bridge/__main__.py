@@ -9,7 +9,7 @@ import asyncio
 import logging
 from typing import Any
 
-from . import controls
+from . import controls, ota
 from .config import LOG_LEVEL, UART_BAUD, UART_PORT, WS_HOST, WS_PORT
 from .state import StateCache
 from .uart_link import UartLink
@@ -59,6 +59,16 @@ async def main() -> None:
                 await controls.dispatch_cmd(bridge, name, msg)
 
     async def on_client_message(msg: dict) -> None:
+        if msg.get("type") == "ota_request":
+            # Spawn the OTA driver as a detached task — the WS client
+            # observes progress via broadcast and exits when status
+            # reaches complete/failed.
+            path = msg.get("path")
+            if not isinstance(path, str):
+                log.warning("ota_request missing 'path' string: %s", msg)
+                return
+            asyncio.create_task(ota.run_ota(uart, ws.broadcast, path))
+            return
         if msg.get("type") == "call_service":
             ha_av = cache.ha_availability()
             if ha_av != "online":
