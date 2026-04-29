@@ -570,10 +570,20 @@ void panel_app_on_connected(esp_mqtt_client_handle_t client)
 }
 
 // Buffer size for the wrapped UART line we forward to the Pi. Must be big
-// enough for the largest retained entity snapshot — entities declared with
-// `attributes: all` can reach several hundred bytes, and the envelope adds
-// ~60 bytes on top.
-#define FORWARD_BUF_SIZE 2048
+// enough for:
+//   - the largest retained entity_state snapshot (entities declared with
+//     `attributes: all` can reach 1.5 KB for a multi-plan schedule)
+//   - the roster, which grows linearly with the manifest entity count —
+//     ~160 bytes per entity, so 16 entities ≈ 2.5 KB. Bumped from 2048
+//     to 4096 after observing `roster envelope overflow (2529 bytes),
+//     dropping` on the Front Room Smart Feeder roster.
+//
+// Allocated on the stack inside each forward_* helper. The MQTT task's
+// stack (CONFIG_MQTT_TASK_STACK_SIZE, default 6144) is the upper bound;
+// going past ~5 KB here would risk overflow. If a future panel grows the
+// roster past ~3.5 KB, switch the roster forwarder to heap allocation
+// rather than bumping this further.
+#define FORWARD_BUF_SIZE 4096
 
 static void forward_entity_state(const char *entity_id, int entity_id_len,
                                  const char *data, int data_len)

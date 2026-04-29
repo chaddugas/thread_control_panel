@@ -88,10 +88,22 @@ class UartLink:
 
     async def send(self, msg: dict) -> bool:
         """Encode msg as a JSON line and write to UART. Returns False if the
-        link is currently down (caller can decide to drop or queue)."""
+        link is currently down (caller can decide to drop or queue).
+
+        A leading newline is prepended to every send. Reason: the Pi's UART
+        line carries noise during early boot (kernel BREAK, possible early
+        console output) before any reader is attached. The C6's rx_task
+        accumulates those bytes into its line buffer because nothing
+        terminates them with `\\n`. The first byte we write that ends with
+        `\\n` would otherwise dispatch the accumulated garbage *together*
+        with our valid message, and the C6's substring match would fail
+        on the garbled prefix. Prepending `\\n` flushes the boot junk first
+        (dispatched as a no-op since the C6 ignores empty lines), then our
+        real content lands in a clean buffer. Cheap (one byte) and bombproof.
+        """
         if self._writer is None:
             return False
-        line = (json.dumps(msg, separators=(",", ":")) + "\n").encode("utf-8")
+        line = ("\n" + json.dumps(msg, separators=(",", ":")) + "\n").encode("utf-8")
         try:
             self._writer.write(line)
             await self._writer.drain()

@@ -68,12 +68,22 @@
 :root {
   --display: "Fraunces", "Times New Roman", serif;
   --body: "Instrument Sans", -apple-system, BlinkMacSystemFont, sans-serif;
-  --pad: clamp(0.85rem, 1.4vw, 1.4rem);
+  --pad: clamp(1.1rem, 1.6vw, 1.8rem);
   --theme-transition:
     background-color 700ms ease,
     color 700ms ease,
     border-color 700ms ease,
     box-shadow 700ms ease;
+}
+
+/* Kiosk-targeted base scale: the Waveshare 6.25" panel is 1560×720, an
+ * aspect ratio (>2:1) only this device hits. Bump the root font-size so
+ * the rem-based clamp() ceilings climb proportionally for at-a-distance
+ * reading. Normal-aspect dev browsers stay at 16px. */
+@media (min-width: 1500px) and (min-aspect-ratio: 2 / 1) {
+  :root {
+    font-size: 20px;
+  }
 }
 
 *,

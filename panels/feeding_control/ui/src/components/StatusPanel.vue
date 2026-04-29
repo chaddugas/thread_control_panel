@@ -138,6 +138,7 @@ const relativeLine = computed(() => {
 
 <style scoped>
 .card {
+  flex: 1;
   padding: 1rem 1.25rem 0.5rem;
   display: flex;
   flex-direction: column;
@@ -149,11 +150,13 @@ const relativeLine = computed(() => {
 }
 
 .hero {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.45rem;
-  padding: 0.6rem 0 0.6rem;
+  justify-content: center;
+  gap: 0.55rem;
+  padding: 0.6rem 0;
 }
 
 .label {

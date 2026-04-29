@@ -192,6 +192,10 @@ onUnmounted(() => {
   margin: 0;
   padding: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  gap: 0.5rem;
   overflow-y: auto;
   scroll-behavior: smooth;
   transition: opacity 380ms ease;

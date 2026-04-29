@@ -116,16 +116,6 @@ const stateLabel = computed(() => {
   background: var(--row-active);
 }
 
-.row + .row::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: var(--hairline);
-}
-
 .head {
   display: grid;
   grid-template-columns: 1.6rem auto auto auto 1fr;
