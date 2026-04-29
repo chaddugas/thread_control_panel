@@ -280,6 +280,7 @@ cut-release() {
 
   # ----- bump integration manifest.json -----
   local manifest_path="$repo_root/platform/integration/thread_panel/manifest.json"
+  local version_header="$repo_root/platform/firmware/components/panel_platform/include/panel_version.h"
   local bare_version
   bare_version=$(_cr_no_v "$new_version")
   if [[ -f "$manifest_path" ]]; then
@@ -292,11 +293,27 @@ data["version"] = version
 p.write_text(json.dumps(data, indent=2) + "\n")
 PY
     git -C "$repo_root" add "$manifest_path"
-    if git -C "$repo_root" diff --cached --quiet; then
-      print "cut-release: manifest already at $new_version — no version commit needed"
-    else
-      git -C "$repo_root" commit -m "Release $new_version"
-    fi
+  fi
+  # Bump the firmware's PANEL_VERSION constant. C6 publishes this retained
+  # at state/version on every MQTT connect; HA's update.panel_firmware
+  # entity (Phase 3) reads it as installed_version.
+  if [[ -f "$version_header" ]]; then
+    python3 - "$version_header" "$new_version" <<'PY'
+import re, sys, pathlib
+path, version = sys.argv[1], sys.argv[2]
+p = pathlib.Path(path)
+text = p.read_text()
+new_text = re.sub(r'^#define PANEL_VERSION ".*"$',
+                  f'#define PANEL_VERSION "{version}"',
+                  text, count=1, flags=re.MULTILINE)
+p.write_text(new_text)
+PY
+    git -C "$repo_root" add "$version_header"
+  fi
+  if git -C "$repo_root" diff --cached --quiet; then
+    print "cut-release: version files already at $new_version — no version commit needed"
+  else
+    git -C "$repo_root" commit -m "Release $new_version"
   fi
 
   # ----- tag + push -----

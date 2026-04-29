@@ -48,6 +48,11 @@
 // shutdown command.
 #define PANEL_TOPIC_CMD_REBOOT_C6          "thread_panel/" PANEL_ID "/cmd/reboot_c6"
 
+// Firmware version. Published retained on each MQTT connect so the HA
+// `update.panel_firmware` entity (Phase 3) can read installed_version.
+// PANEL_VERSION comes from panel_version.h, updated by cut-release.
+#define PANEL_TOPIC_STATE_VERSION          "thread_panel/" PANEL_ID "/state/version"
+
 // Pi-side commands. Forwarded to the Pi over UART as panel_cmd envelopes
 // for the bridge to dispatch. Subscribed explicitly (rather than via a
 // cmd/# wildcard) to avoid receiving our own cmd/call_service publishes

@@ -2,8 +2,10 @@
 #include "panel_config.h"
 #include "panel_lidar.h"
 #include "panel_net.h"
+#include "panel_ota_uart.h"
 #include "panel_sensors.h"
 #include "panel_uart.h"
+#include "panel_version.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -48,16 +50,31 @@ static bool s_ha_online = false;
 // Pi needs sensor updates regardless of OTA state.
 static volatile bool s_ota_active = false;
 
+// Gate every panel_uart_send_line we own behind UART OTA — the line is
+// carrying raw firmware bytes at 921600 baud during OTA and any JSON we
+// emit would corrupt it. HTTP OTA is fine to publish through (UART and
+// Thread are independent); only s_ota_active gates the MQTT side.
+static esp_err_t forward_to_pi_uart(const char *line, size_t len)
+{
+    if (panel_ota_uart_is_active())
+    {
+        return ESP_OK; // silently drop; recovery on natural redelivery
+    }
+    return panel_uart_send_line(line, len);
+}
+
 static void publish_proximity(int dist_cm, int strength)
 {
-    char uart_payload[96];
-    int u = snprintf(uart_payload, sizeof(uart_payload),
-                     "{\"type\":\"sensor\",\"name\":\"proximity\","
-                     "\"value\":%d,\"strength\":%d}",
-                     dist_cm, strength);
-    (void)panel_uart_send_line(uart_payload, u);
+    {
+        char uart_payload[96];
+        int u = snprintf(uart_payload, sizeof(uart_payload),
+                         "{\"type\":\"sensor\",\"name\":\"proximity\","
+                         "\"value\":%d,\"strength\":%d}",
+                         dist_cm, strength);
+        (void)forward_to_pi_uart(uart_payload, u);
+    }
 
-    if (!s_ha_online || s_ota_active)
+    if (!s_ha_online || s_ota_active || panel_ota_uart_is_active())
     {
         return;
     }
@@ -81,14 +98,16 @@ static void publish_ambient(int raw, int mv)
         if (pct > 100) pct = 100;
     }
 
-    char uart_payload[128];
-    int u = snprintf(uart_payload, sizeof(uart_payload),
-                     "{\"type\":\"sensor\",\"name\":\"ambient\","
-                     "\"value\":%d,\"raw\":%d,\"mv\":%d}",
-                     pct, raw, mv);
-    (void)panel_uart_send_line(uart_payload, u);
+    {
+        char uart_payload[128];
+        int u = snprintf(uart_payload, sizeof(uart_payload),
+                         "{\"type\":\"sensor\",\"name\":\"ambient\","
+                         "\"value\":%d,\"raw\":%d,\"mv\":%d}",
+                         pct, raw, mv);
+        (void)forward_to_pi_uart(uart_payload, u);
+    }
 
-    if (!s_ha_online || s_ota_active)
+    if (!s_ha_online || s_ota_active || panel_ota_uart_is_active())
     {
         return;
     }
@@ -145,6 +164,15 @@ static void sensors_publish_task(void *arg)
 static void on_uart_line(const char *line, size_t len)
 {
     ESP_LOGI(TAG, "UART RX (%u bytes): %s", (unsigned)len, line);
+
+    // ota_begin: handled before the ha_availability gate. Firmware updates
+    // must work even when HA is unreachable (the whole point is to recover
+    // from broken state via the local UART link).
+    if (strstr(line, "\"type\":\"ota_begin\"") != NULL)
+    {
+        (void)panel_ota_uart_handle_begin(line, len);
+        return;
+    }
 
     if (!s_ha_online)
     {
@@ -256,7 +284,7 @@ static void forward_ha_availability_to_uart(bool online)
     int n = snprintf(line, sizeof(line),
                      "{\"type\":\"ha_availability\",\"value\":\"%s\"}",
                      online ? "online" : "offline");
-    (void)panel_uart_send_line(line, n);
+    (void)forward_to_pi_uart(line, n);
 }
 
 // On offline→online transition, republish current cached sensor values once
@@ -513,12 +541,27 @@ void panel_app_init(void)
     ESP_ERROR_CHECK(panel_sensors_init());
     ESP_ERROR_CHECK(panel_lidar_init());
 
+    panel_ota_uart_init();
+
     xTaskCreate(sensors_publish_task, "sensors_pub",
                 4096, NULL, 5, NULL);
 }
 
 void panel_app_on_connected(esp_mqtt_client_handle_t client)
 {
+    // Publish current firmware version retained — Phase 3's HA
+    // update.panel_firmware entity reads this as installed_version.
+    {
+        char ver_payload[96];
+        int n = snprintf(ver_payload, sizeof(ver_payload),
+                         "{\"version\":\"%s\"}", PANEL_VERSION);
+        if (n > 0 && n < (int)sizeof(ver_payload))
+        {
+            esp_mqtt_client_publish(client, PANEL_TOPIC_STATE_VERSION,
+                                    ver_payload, n, 1, 1);
+        }
+    }
+
     // Readiness signal. Retained message delivers immediately if HA is
     // already online.
     int msg_id = esp_mqtt_client_subscribe(client,
@@ -609,7 +652,7 @@ static void forward_entity_state(const char *entity_id, int entity_id_len,
         ESP_LOGW(TAG, "entity_state envelope overflow (%d bytes), dropping", n);
         return;
     }
-    (void)panel_uart_send_line(buf, n);
+    (void)forward_to_pi_uart(buf, n);
 }
 
 static void forward_roster(const char *data, int data_len)
@@ -629,7 +672,7 @@ static void forward_roster(const char *data, int data_len)
         ESP_LOGW(TAG, "roster envelope overflow (%d bytes), dropping", n);
         return;
     }
-    (void)panel_uart_send_line(buf, n);
+    (void)forward_to_pi_uart(buf, n);
 }
 
 // Panel-itself set/<name>: wrap with a panel_set envelope that names the
@@ -655,7 +698,7 @@ static void forward_panel_set(const char *name, int name_len,
         ESP_LOGW(TAG, "panel_set envelope overflow (%d bytes), dropping", n);
         return;
     }
-    (void)panel_uart_send_line(buf, n);
+    (void)forward_to_pi_uart(buf, n);
 }
 
 // Panel-itself cmd/<name>: wrap with a panel_cmd envelope and forward over
@@ -690,7 +733,7 @@ static void forward_panel_cmd(const char *name, int name_len,
         ESP_LOGW(TAG, "panel_cmd envelope overflow (%d bytes), dropping", n);
         return;
     }
-    (void)panel_uart_send_line(buf, n);
+    (void)forward_to_pi_uart(buf, n);
 }
 
 void panel_app_on_data(esp_mqtt_client_handle_t client,

@@ -3,6 +3,7 @@ idf_component_register(
         "panel_platform.c"
         "panel_net.c"
         "panel_uart.c"
+        "panel_ota_uart.c"
         "panel_sensors.c"
         "panel_lidar.c"
     INCLUDE_DIRS
@@ -21,6 +22,7 @@ idf_component_register(
         vfs
         app_update
         esp_partition
+        mbedtls
     EMBED_TXTFILES
         "certs/ca_cert.pem"
 )

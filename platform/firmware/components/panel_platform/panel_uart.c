@@ -11,16 +11,21 @@
 
 static const char *TAG = "panel_uart";
 
-#define RX_RING_BYTES    1024
+// RX ring sized for OTA at 921600 baud (~92 KB/s). At 4 KB the driver-level
+// buffer holds ~45 ms of incoming bytes — enough headroom for the rx_task
+// to copy chunks into the OTA stream buffer without dropping under load.
+#define RX_RING_BYTES    4096
 #define TX_RING_BYTES    1024
 #define LINE_BUF_BYTES   1024
-#define RX_CHUNK_BYTES   64
+#define RX_CHUNK_BYTES   256
 #define RX_TASK_STACK    4096
 #define RX_TASK_PRIORITY 10
 
 static panel_uart_line_cb_t s_on_line = NULL;
-static SemaphoreHandle_t s_tx_mutex = NULL;
-static bool s_initialized = false;
+static panel_uart_raw_cb_t  s_on_raw  = NULL;
+static void                *s_raw_user = NULL;
+static SemaphoreHandle_t    s_tx_mutex = NULL;
+static bool                 s_initialized = false;
 
 static void rx_task(void *arg)
 {
@@ -35,6 +40,18 @@ static void rx_task(void *arg)
                                 sizeof(chunk), pdMS_TO_TICKS(100));
         if (n <= 0)
         {
+            continue;
+        }
+
+        // Snapshot the raw callback once per chunk. If raw mode is active,
+        // forward verbatim and skip line framing entirely. Reset any partial
+        // line accumulation so we don't splice raw bytes into a half-built
+        // line if the mode was just switched.
+        panel_uart_raw_cb_t raw_cb = s_on_raw;
+        if (raw_cb)
+        {
+            len = 0;
+            raw_cb(chunk, (size_t)n, s_raw_user);
             continue;
         }
 
@@ -148,4 +165,62 @@ esp_err_t panel_uart_send_line(const char *line, size_t len)
     xSemaphoreGive(s_tx_mutex);
 
     return (w1 == (int)len && w2 == 1) ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t panel_uart_write_raw(const uint8_t *data, size_t len)
+{
+    if (!s_initialized)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    xSemaphoreTake(s_tx_mutex, portMAX_DELAY);
+    int w = uart_write_bytes((uart_port_t)PANEL_UART_PORT, data, len);
+    xSemaphoreGive(s_tx_mutex);
+
+    return (w == (int)len) ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t panel_uart_set_raw_mode(panel_uart_raw_cb_t cb, void *user)
+{
+    if (!s_initialized)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_raw_user = user;
+    s_on_raw   = cb; // last write — rx_task snapshots s_on_raw per chunk
+    return ESP_OK;
+}
+
+esp_err_t panel_uart_clear_raw_mode(void)
+{
+    if (!s_initialized)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_on_raw   = NULL;
+    s_raw_user = NULL;
+    return ESP_OK;
+}
+
+esp_err_t panel_uart_set_baud(int baud)
+{
+    if (!s_initialized)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+    // Drain any pending TX bytes at the old baud before changing — otherwise
+    // they'd come out garbled at the new rate. uart_wait_tx_done is the
+    // canonical way to flush.
+    (void)uart_wait_tx_done((uart_port_t)PANEL_UART_PORT, pdMS_TO_TICKS(200));
+    esp_err_t err = uart_set_baudrate((uart_port_t)PANEL_UART_PORT, baud);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "uart_set_baudrate(%d) failed: %s", baud, esp_err_to_name(err));
+    }
+    else
+    {
+        ESP_LOGI(TAG, "UART baud → %d", baud);
+    }
+    return err;
 }

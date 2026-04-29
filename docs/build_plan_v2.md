@@ -165,29 +165,36 @@ Restart HA after. Once we set up HACS-as-custom-repo (optional, post-V2), this b
 
 **No new hardware. Pi can flash C6 manually via a CLI; HA integration unchanged from Phase 1.**
 
-### Wire protocol
+### Wire protocol (as implemented in chunk 2a)
 
 Extends the line-based JSON UART protocol with one binary mode for the firmware payload. Reuses existing OTA partition setup from V1 step 13 (E1 — partition table doesn't change). Reuses ESP-IDF rollback machinery (E2 — self-validation + bootloader revert).
 
 ```
-Pi → C6: {"type":"ota_begin","size":1462320,"sha256":"abc...","version":"v2.0.0-beta.1"}
-C6 → Pi: {"type":"ota_ready","baud":921600}
-[both sides switch UART to 921600 baud]
-Pi → C6: <raw firmware bytes, chunked 4 KB at a time>
-C6 → Pi: {"type":"ota_progress","bytes":N}            # every 32 KB
-Pi → C6: {"type":"ota_end"}
-[both sides switch back to 115200 baud]
-C6 → Pi: {"type":"ota_result","status":"ok"|"error","detail":"..."}
-[on success, C6: esp_ota_set_boot_partition() + esp_restart()]
-[on next boot, C6 self-validates: MQTT reconnect within 30s → esp_ota_mark_app_valid_cancel_rollback()]
+Pi → C6: {"type":"ota_begin","size":1462320,"sha256":"abc..."}    [line, 115200]
+C6 → Pi: {"type":"ota_ready"}                                      [line, 115200]
+[both sides switch UART to 921600; C6 enters raw-pass-through mode]
+Pi → C6: <exactly N raw firmware bytes>                            [raw, 921600]
+[after N bytes received, both switch back to 115200 + line mode]
+C6 → Pi: {"type":"ota_result","status":"ok|error","detail":"..."}  [line, 115200]
+[on success: esp_ota_set_boot_partition() + esp_restart() after a 1s drain]
+[on next boot, C6 self-validates: MQTT reconnect → esp_ota_mark_app_valid_cancel_rollback()]
 [if self-validation fails, bootloader reverts on next reset]
 ```
 
-### C6 firmware additions (in `platform/firmware/components/panel_platform/`)
+Simplifications vs. the original sketch:
 
-- New file: `panel_ota_uart.c` — ota_begin handler, chunk receiver writing to OTA partition via `esp_ota_write()`, sha256 verification, baud switching.
-- `panel_app.c` wires the new handler into the UART dispatch.
-- Build-time version embedding: a generated `panel_version.h` containing `PANEL_VERSION` set from `git describe --tags` at build time. `panel_app.c` publishes `state/version` retained on every MQTT connect with `{"version": "v2.0.0-beta.1", "build_time": "..."}`.
+- **No `ota_progress` interleaved during raw transfer.** Once we're in raw mode at 921600, anything looking like `{` is just firmware bytes — JSON envelopes can't be distinguished. Progress UI is the Pi's job (it knows how many bytes it's sent).
+- **No `ota_end`.** C6 already knows how many bytes to expect from `ota_begin.size`; it switches back to line mode after exactly N bytes.
+- **No baud field in `ota_ready`.** Both sides hard-code OTA_BAUD_TRANSFER=921600. If we ever want to bump it, change the constant in both places in lockstep.
+- **`ota_begin` handled even when `ha_availability == offline`.** Recovery path needs to work when HA is unreachable.
+
+### C6 firmware additions (`platform/firmware/components/panel_platform/`)
+
+- `panel_ota_uart.{c,h}` — ota_begin parser, OTA partition write loop, sha256 verification (PSA Crypto — IDF v6.0 dropped the legacy `mbedtls/sha256.h` direct API in favor of PSA), baud switching, worker task.
+- `panel_uart.{c,h}` extended with raw-mode callback API (`panel_uart_set_raw_mode` / `clear`) and runtime baud-switch (`panel_uart_set_baud`). Bumped RX ring buffer from 1 KB to 4 KB for headroom at 921600.
+- `panel_version.h` — committed stub `v0.0.0-dev`; `cut-release` overwrites it as part of the version-bump phase, alongside the integration's `manifest.json`.
+- `panel_app.c` wires the OTA dispatcher (handled before the ha_availability gate so OTA works during HA outages), publishes `state/version` retained on each MQTT connect, and gates every UART forward through `forward_to_pi_uart()` which drops sends while OTA is active.
+- `mbedtls` added to `panel_platform/CMakeLists.txt` PRIV_REQUIRES for sha256.
 
 ### Pi additions (in `platform/bridge/`)
 
