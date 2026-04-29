@@ -122,7 +122,7 @@ const stateLabel = computed(() => {
   align-items: baseline;
   width: 100%;
   gap: 0.85rem;
-  padding: 1.1rem 1rem;
+  padding: 0.85rem 1rem;
   background: transparent;
   border: 0;
   text-align: left;

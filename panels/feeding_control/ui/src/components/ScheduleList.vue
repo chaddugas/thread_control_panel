@@ -198,7 +198,6 @@ onUnmounted(() => {
   flex-direction: column;
   justify-content: space-around;
   gap: 0.5rem;
-  overflow: hidden;
   transition: opacity 380ms ease;
 }
 
