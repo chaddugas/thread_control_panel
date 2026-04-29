@@ -34,7 +34,9 @@
 
 _cr_check_prereqs() {
   local missing=()
-  [[ -n "${IDF_PATH:-}" ]] || missing+=("ESP-IDF v6.0 shell (run \`idf\` first)")
+  if [[ -z "${IDF_PATH:-}" || -z "${IDF_PYTHON_ENV_PATH:-}" ]]; then
+    missing+=("ESP-IDF v6.0 shell (run \`idf\` first; both \$IDF_PATH and \$IDF_PYTHON_ENV_PATH must be set)")
+  fi
   (( $+commands[gum] )) || missing+=("gum (\`brew install gum\`)")
   (( $+commands[gh] )) || missing+=("gh (\`brew install gh && gh auth login\`)")
   (( $+commands[yarn] )) || missing+=("yarn")
@@ -325,7 +327,10 @@ PY
     if [[ -d "$firmware_dir" && -f "$firmware_dir/CMakeLists.txt" ]]; then
       print ""
       print "→ ${panel_id} firmware..."
-      ( cd "$firmware_dir" && idf.py build ) || return 1
+      # idf.py is an alias in interactive shells — aliases don't expand
+      # inside function bodies in zsh, so invoke through the explicit
+      # python+script path (same approach as the user's `idf` zsh function).
+      ( cd "$firmware_dir" && "$IDF_PYTHON_ENV_PATH/bin/python" "$IDF_PATH/tools/idf.py" build ) || return 1
       local project_name bin_path
       project_name=$(_cr_firmware_project_name "$firmware_dir")
       [[ -n "$project_name" ]] || { print -u2 "cut-release: couldn't read project_name from $firmware_dir/build/project_description.json"; return 1 }
