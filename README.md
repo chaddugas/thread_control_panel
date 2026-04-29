@@ -30,4 +30,4 @@ tools/                          # cross-cutting deploy / dev scripts
 
 The platform/product split is the architectural backbone: anything in `platform/` should be device-agnostic (works for any future thread_panel product); anything in `panels/<id>/` is specific to that product. The HA integration sits at the repo root rather than under `platform/` because HACS validates `custom_components/<domain>/` at that path.
 
-See `docs/build_plan.md` for the canonical project state, build order, and decisions.
+See [`docs/build_plan_v1.md`](docs/build_plan_v1.md) for current production state and the V1 build history, and [`docs/build_plan_v2.md`](docs/build_plan_v2.md) for the active V2 work (artifact-based releases + HA-orchestrated remote updates).

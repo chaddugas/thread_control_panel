@@ -1,6 +1,8 @@
-# Thread Control Panel — Build Plan
+# Thread Control Panel — Build Plan V1 (historical)
 
-> **Status: V1 shipped 2026-04-28.** End-to-end pipeline working: HA ↔ integration ↔ MQTT ↔ C6 ↔ Pi bridge ↔ kiosk. Auto-deploy on `cut-release`, boot-time resync, rotated-touch kiosk, schedule + manual-feed UI. See [V2 / Post-V1 follow-ups](#v2--post-v1-follow-ups) for what's next.
+> **Status: V1 shipped 2026-04-28.** End-to-end pipeline working: HA ↔ integration ↔ MQTT ↔ C6 ↔ Pi bridge ↔ kiosk. Auto-deploy on `cut-release`, boot-time resync, rotated-touch kiosk, schedule + manual-feed UI.
+>
+> **Active work has moved to [build_plan_v2.md](build_plan_v2.md).** This document is the historical record of V1 and the reference for current production state (MQTT topic schema, UART protocol, sensor wiring, panel-itself entity contract, etc.). V2 extends or supersedes specific pieces — see the V2 doc for what's changing. The "V2 / Post-V1 follow-ups" section below is preserved as the original wishlist; items that have been promoted into formal V2 phases are tracked in `build_plan_v2.md`.
 
 The project is a **platform** for building no-WiFi Thread-based touchscreen control panels for Home Assistant, plus its **first product** (`feeding_control` — a pet feeder UI). This doc covers both: the platform-level work and the product-level work for `feeding_control`. Future products will get their own short product-specific docs and reference this one.
 
@@ -466,6 +468,8 @@ esp_mqtt_client_config_t mqtt_cfg = {
 
 Not blocking V1 ship, but called out so we don't lose them.
 
+> **Promoted to V2.** The items in this section have been carried into [build_plan_v2.md](build_plan_v2.md) as Steps 18–22 (organized by the same theme groupings). The V2 doc is the active source for these — edit there, not here. This section is preserved as the original wishlist for historical context.
+
 ### Setup & deploy
 
 - **`install-pi.sh` full bootstrap from a fresh Pi OS Lite.** Currently the script assumes the user has already cloned the repo, set up the bridge venv, and apt-installed cog. Fold all of that in so a brand-new Pi can be brought up with one command. While we're there, fold in the steps from earlier build phases that still live as prose in this doc: `dtoverlay=disable-bt` for PL011 on GPIO 14/15 (step 4), serial-console disable, NetworkManager bring-up, and any other one-time setup. End state: image SD → boot → ssh in → run script → reboot → kiosk runs. This should be device agnostic to whatever extent is possible.
@@ -515,6 +519,8 @@ Not blocking V1 ship, but called out so we don't lose them.
 - ~~UI deploys not picked up by kiosk because WPE caches `index.html` heuristically~~ — fixed 2026-04-28. `python3 -m http.server` (the original `panel-ui.service` ExecStart) sends no `Cache-Control` header, so WPE WebKit falls back to RFC 7234 heuristic caching using `Last-Modified`. Compounding factor: `git pull` preserves the original mtime of files it checks out, so post-`cut-release` deploys arrive on the Pi with the *original Vite-build mtime from the Mac*, not the current time — WPE saw "this file's Last-Modified is the same as last cache" and reused the stale entry. Symptom: every `cut-release` followed by a Pi reboot showed the previous UI until either a manual cache wipe or an mtime-touching edit. Fix: replaced the built-in `http.server` with [`panel-ui-server.py`](../platform/deploy/panel-ui-server.py), a 30-line subclass that sends `Cache-Control: no-cache, no-store, must-revalidate` for `index.html` and `Cache-Control: public, max-age=31536000, immutable` for everything else (Vite's hash-named JS/CSS/font files are content-addressed and safe to cache forever). `panel-ui.service` updated to invoke the new server. Also discovered along the way: WPE's actual cache directories are `~/.cache/wpe/` and `~/.local/share/wpe/`, not `~/.cache/wpe-webkit/` as I'd guessed — earlier "clear the cache" instructions were inadvertently no-ops.
 
 ### Outstanding (V2)
+
+> **Promoted to V2.** The single item below has been consolidated into [build_plan_v2.md](build_plan_v2.md) Step 20 (NVS-provisioned per-device credentials), which addresses the same root issue. Edit there, not here.
 
 - MQTT credentials in sdkconfig (plaintext) — fine for V1's single device. `sdkconfig` is gitignored so they're not exposed, but every device built from this tree gets identical credentials. Move to NVS-provisioned per-device credentials before deploying a fleet.
 

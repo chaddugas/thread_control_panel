@@ -591,7 +591,7 @@ static void forward_entity_state(const char *entity_id, int entity_id_len,
     // The retained payload is a well-formed JSON object
     // `{"state":"...","attributes":{...}}`. We strip the outer braces and
     // inline the inner fields alongside type + entity_id to match the
-    // UART protocol in docs/build_plan.md.
+    // UART protocol in docs/build_plan_v1.md.
     if (data_len < 2 || data[0] != '{' || data[data_len - 1] != '}')
     {
         ESP_LOGW(TAG, "entity_state payload malformed (%.*s), dropping",
