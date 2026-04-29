@@ -14,12 +14,9 @@ dist/
 .vite/
 *.local
 
-# Per-panel UI builds are committed for kiosk deploy. `cut-release` rebuilds
-# dist/ before tagging so each release ships a matching source + bundle, and
-# the Pi pulls a ready-to-serve dist/ on each panel-bridge restart instead of
-# building locally.
-!panels/*/ui/dist/
-!panels/*/ui/dist/**
+# Per-panel UI builds: V1 committed dist/ to git so the Pi could pull it
+# on each panel-bridge restart. V2 ships dist/ as a release-tarball artifact
+# instead, so dist/ is gitignored under the general `dist/` rule above.
 
 # Python
 __pycache__/
