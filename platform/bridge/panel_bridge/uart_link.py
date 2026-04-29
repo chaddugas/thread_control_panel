@@ -124,6 +124,18 @@ class UartLink:
         """
         if self._writer is None:
             return False
+        # While an OTA session has the link, suppress any non-ota_* writes.
+        # During the raw transfer phase the C6 is interpreting incoming
+        # bytes as firmware payload — a stray call_service line would be
+        # written straight into the OTA partition and the sha256 would
+        # mismatch. ota_* envelopes (ota_begin) are still allowed because
+        # the OTA driver itself uses this path.
+        mtype = msg.get("type", "")
+        if self._ota_queue is not None and not (
+            isinstance(mtype, str) and mtype.startswith("ota_")
+        ):
+            log.debug("UART send suppressed during OTA: type=%s", mtype)
+            return False
         line = ("\n" + json.dumps(msg, separators=(",", ":")) + "\n").encode("utf-8")
         try:
             self._writer.write(line)
@@ -143,6 +155,20 @@ class UartLink:
             raise RuntimeError("UART link down")
         self._writer.write(data)
         await self._writer.drain()
+
+    async def wait_tx_done(self) -> None:
+        """Block until ALL queued TX bytes have actually been transmitted
+        on the wire — not just flushed from the asyncio buffer to the OS
+        buffer. drain() only does the latter; without this, switching baud
+        right after writing raw bytes causes the OS-buffered bytes (which
+        can be several KB) to be transmitted at the NEW baud, garbling them
+        on the receiver. Uses pyserial's serial.flush() (which calls
+        tcdrain under the hood) on a worker thread so the event loop
+        keeps running."""
+        if self._writer is None:
+            return
+        serial_obj = self._writer.transport.serial
+        await asyncio.to_thread(serial_obj.flush)
 
     def set_baud(self, baud: int) -> None:
         """Reconfigure the serial port's baud rate at runtime. Used during
@@ -201,6 +227,9 @@ class OtaSession:
 
     async def write_raw(self, data: bytes) -> None:
         await self._link.write_raw(data)
+
+    async def wait_tx_done(self) -> None:
+        await self._link.wait_tx_done()
 
     def set_baud(self, baud: int) -> None:
         self._link.set_baud(baud)

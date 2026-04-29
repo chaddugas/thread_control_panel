@@ -126,6 +126,24 @@ static void sensors_publish_task(void *arg)
     int ticks = 0;
     while (true)
     {
+        // Skip the entire body during UART OTA — sensor reads, prints,
+        // publishes all consume CPU we'd rather give to the OTA worker
+        // task and the UART rx_task. Forwards/publishes are already gated
+        // elsewhere; this also stops the periodic log spam in the monitor
+        // during a long-running OTA.
+        //
+        // Note on the asymmetry with panel_lidar_pause / panel_net_pause:
+        // those exist because the lidar has a dedicated background task
+        // doing UART0 reads, and esp-mqtt has its own internal task doing
+        // TLS-handshake reconnects — neither stops just because nobody
+        // calls into it. Ambient is purely an on-demand adc_oneshot_read
+        // from this task, so this early-skip alone fully stops it.
+        if (panel_ota_uart_is_active())
+        {
+            vTaskDelay(pdMS_TO_TICKS(SENSOR_TICK_MS));
+            continue;
+        }
+
         int dist     = panel_lidar_get_distance_cm();
         int strength = panel_lidar_get_strength();
         if (dist >= 0)

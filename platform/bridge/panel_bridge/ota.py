@@ -33,6 +33,16 @@ OTA_BAUD_TRANSFER = 921600
 # 4 KB chunks align with the C6 OTA partition's flash sector size and
 # work nicely with the C6-side stream buffer drain loop.
 WRITE_CHUNK_BYTES = 4096
+# Pacing: sleep this much after each chunk write so the Pi doesn't outrun
+# the C6's flash write throughput. ESP32-C6 esp_ota_write per 4 KB sector
+# is normally 30-50 ms but spikes higher during sector erases. Pi sleep
+# overlaps with the 921600-baud transmit (~45 ms for 4 KB) since the OS
+# UART buffers the bytes, so effective per-chunk time = max(transmit, sleep).
+# 80 ms paces effective throughput to ~50 KB/s — leaves the C6 with ~30 ms
+# of headroom per chunk to absorb occasional slow flash writes without
+# silently dropping bytes at its ESP-IDF UART RX ring (which doesn't log
+# overflow warnings the way our stream buffer does).
+INTER_CHUNK_PACING_SEC = 0.08
 # How often to broadcast a progress envelope during the raw transfer.
 PROGRESS_INTERVAL_SEC = 0.5
 
@@ -114,6 +124,10 @@ async def run_ota(uart: UartLink, broadcast: Broadcast, bin_path: str) -> bool:
                     chunk = data[offset : offset + WRITE_CHUNK_BYTES]
                     await session.write_raw(chunk)
                     sent += len(chunk)
+                    # Pace so the C6's drain task can keep up with flash
+                    # writes — without this, stream buffer overflows and
+                    # bytes get dropped → drain loop rx timeout.
+                    await asyncio.sleep(INTER_CHUNK_PACING_SEC)
                     now = time.monotonic()
                     if now - last_progress >= PROGRESS_INTERVAL_SEC:
                         await _emit_progress(broadcast, sent, size, now - start)
@@ -122,17 +136,33 @@ async def run_ota(uart: UartLink, broadcast: Broadcast, bin_path: str) -> bool:
                 log.exception("raw transfer failed")
                 # Switch back before reporting so the link is sane again.
                 try:
+                    await session.wait_tx_done()
                     session.set_baud(OTA_BAUD_STEADY)
                 except Exception:
                     pass
                 await _emit_status(broadcast, "failed", f"transfer error: {e}")
                 return False
             finally:
-                # Defensive: ensure we always restore baud.
+                # Critical: wait for ALL queued bytes to physically transmit
+                # at 921600 BEFORE switching baud back. drain() only flushes
+                # the asyncio buffer to the OS — kernel buffer (several KB)
+                # would otherwise drain at the new (115200) baud, garbling
+                # the last bytes the C6 reads as firmware payload and
+                # causing a sha256 mismatch.
+                #
+                # set_baud is called in its own try so wait_tx_done failing
+                # never leaves the Pi stuck at 921600 — that wedges the link
+                # because the C6 (at 115200) reads everything as garbage and
+                # we lose ota_result + all subsequent traffic until reboot.
+                try:
+                    await asyncio.wait_for(session.wait_tx_done(), timeout=5.0)
+                    await asyncio.sleep(0.02)  # HW FIFO padding
+                except (asyncio.TimeoutError, Exception):
+                    log.exception("OTA: wait_tx_done failed (continuing)")
                 try:
                     session.set_baud(OTA_BAUD_STEADY)
                 except Exception:
-                    pass
+                    log.exception("OTA: set_baud back to steady failed")
 
             elapsed = time.monotonic() - start
             await _emit_progress(broadcast, sent, size, elapsed)

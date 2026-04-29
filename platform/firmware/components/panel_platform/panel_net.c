@@ -293,3 +293,26 @@ void panel_net_set_availability_topic(const char *topic)
 {
     s_availability_topic = topic;
 }
+
+void panel_net_pause(void)
+{
+    if (!s_client || !s_mqtt_started)
+    {
+        return;
+    }
+    ESP_LOGI(TAG, "Pausing MQTT client (OTA in progress)");
+    esp_mqtt_client_stop(s_client);
+    s_mqtt_started = false;
+    s_connected = false;
+}
+
+void panel_net_resume(void)
+{
+    if (!s_client || s_mqtt_started)
+    {
+        return;
+    }
+    ESP_LOGI(TAG, "Resuming MQTT client");
+    esp_mqtt_client_start(s_client);
+    s_mqtt_started = true;
+}

@@ -25,6 +25,20 @@ extern "C"
      */
     int panel_lidar_get_strength(void);
 
+    /**
+     * Pause / resume the lidar reader. Used by panel_ota_uart during a
+     * UART OTA so the lidar's per-byte uart_read_bytes calls + UART0 RX
+     * interrupts don't compete with the OTA stream on UART1 for CPU /
+     * interrupt latency. Suspends the parser task and disables UART0 RX
+     * interrupts on pause; reverses both on resume. Idempotent.
+     *
+     * After resume, the next few frames may be dropped on checksum (the
+     * UART0 hardware FIFO can carry stale bytes from the pause window);
+     * the parser self-resyncs on the next 0x59 0x59 header.
+     */
+    void panel_lidar_pause(void);
+    void panel_lidar_resume(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -11,14 +11,19 @@
 
 static const char *TAG = "panel_uart";
 
-// RX ring sized for OTA at 921600 baud (~92 KB/s). At 4 KB the driver-level
-// buffer holds ~45 ms of incoming bytes — enough headroom for the rx_task
-// to copy chunks into the OTA stream buffer without dropping under load.
-#define RX_RING_BYTES    4096
+// RX ring + chunk sized for OTA at 921600 baud (~92 KB/s). The previous
+// 4 KB ring + 256-byte chunks couldn't keep up: each rx_task wakeup drained
+// only 256 bytes while a single 4 KB OTA chunk delivers in ~44 ms, so the
+// ring filled and the ESP-IDF UART driver dropped bytes silently before
+// they ever reached our stream buffer. Now we use a 16 KB ring and 4 KB
+// chunks so each wakeup can sweep the ring nearly clean.
+#define RX_RING_BYTES    16384
 #define TX_RING_BYTES    1024
 #define LINE_BUF_BYTES   1024
-#define RX_CHUNK_BYTES   256
-#define RX_TASK_STACK    4096
+#define RX_CHUNK_BYTES   4096
+// rx_task stack must hold the line buffer (1 KB) + chunk buffer (4 KB)
+// + locals; 8 KB has comfortable headroom.
+#define RX_TASK_STACK    8192
 #define RX_TASK_PRIORITY 10
 
 static panel_uart_line_cb_t s_on_line = NULL;
@@ -209,9 +214,17 @@ esp_err_t panel_uart_set_baud(int baud)
     {
         return ESP_ERR_INVALID_STATE;
     }
+    // No-op when already at the target baud — keeps cleanup_and_release
+    // safe to call after an explicit set_baud (otherwise we'd see a
+    // duplicate "UART baud → X" log every OTA).
+    uint32_t current = 0;
+    if (uart_get_baudrate((uart_port_t)PANEL_UART_PORT, &current) == ESP_OK &&
+        current == (uint32_t)baud)
+    {
+        return ESP_OK;
+    }
     // Drain any pending TX bytes at the old baud before changing — otherwise
-    // they'd come out garbled at the new rate. uart_wait_tx_done is the
-    // canonical way to flush.
+    // they'd come out garbled at the new rate.
     (void)uart_wait_tx_done((uart_port_t)PANEL_UART_PORT, pdMS_TO_TICKS(200));
     esp_err_t err = uart_set_baudrate((uart_port_t)PANEL_UART_PORT, baud);
     if (err != ESP_OK)

@@ -24,6 +24,8 @@ static const char *TAG = "panel_lidar";
 static volatile int s_distance_cm = -1;
 static volatile int s_strength = -1;
 static bool s_initialized = false;
+static TaskHandle_t s_lidar_task = NULL;
+static bool s_paused = false;
 
 static void lidar_task(void *arg)
 {
@@ -134,7 +136,7 @@ esp_err_t panel_lidar_init(void)
 
     BaseType_t ok = xTaskCreate(lidar_task, "panel_lidar",
                                 LIDAR_TASK_STACK, NULL,
-                                LIDAR_TASK_PRIORITY, NULL);
+                                LIDAR_TASK_PRIORITY, &s_lidar_task);
     if (ok != pdPASS)
     {
         ESP_LOGE(TAG, "task create failed");
@@ -155,4 +157,41 @@ int panel_lidar_get_distance_cm(void)
 int panel_lidar_get_strength(void)
 {
     return s_strength;
+}
+
+void panel_lidar_pause(void)
+{
+    if (!s_initialized || s_paused)
+    {
+        return;
+    }
+    ESP_LOGI(TAG, "Pausing LiDAR (OTA in progress)");
+    // Disable RX interrupts before suspending the task — otherwise the
+    // hardware FIFO would still raise interrupts as bytes arrive (~900
+    // bytes/s) for nothing to consume them.
+    (void)uart_disable_rx_intr((uart_port_t)PANEL_LIDAR_UART_PORT);
+    if (s_lidar_task)
+    {
+        vTaskSuspend(s_lidar_task);
+    }
+    s_paused = true;
+}
+
+void panel_lidar_resume(void)
+{
+    if (!s_initialized || !s_paused)
+    {
+        return;
+    }
+    ESP_LOGI(TAG, "Resuming LiDAR");
+    // Drain any stale bytes the hardware FIFO captured before we masked
+    // the interrupt. The parser self-resyncs on the 0x59 0x59 header so
+    // a few dropped frames after resume are expected.
+    (void)uart_flush_input((uart_port_t)PANEL_LIDAR_UART_PORT);
+    (void)uart_enable_rx_intr((uart_port_t)PANEL_LIDAR_UART_PORT);
+    if (s_lidar_task)
+    {
+        vTaskResume(s_lidar_task);
+    }
+    s_paused = false;
 }

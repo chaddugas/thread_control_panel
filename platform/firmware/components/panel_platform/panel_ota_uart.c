@@ -23,6 +23,8 @@
 // bootloader reverts on the next reset.
 
 #include "panel_ota_uart.h"
+#include "panel_lidar.h"
+#include "panel_net.h"
 #include "panel_uart.h"
 
 #include <inttypes.h>
@@ -48,10 +50,12 @@ static const char *TAG = "panel_ota_uart";
 #define OTA_BAUD_STEADY     115200
 #define OTA_BAUD_TRANSFER   921600
 
-// Stream buffer between rx_task (producer) and ota_task (consumer). 16 KB
-// holds ~175 ms of bytes at 921600 baud — plenty of headroom for esp_ota_write
-// stalls (typical 20-50 ms per flash sector).
-#define OTA_STREAM_BUF_BYTES 16384
+// Stream buffer between rx_task (producer) and ota_task (consumer). 64 KB
+// holds ~700 ms of bytes at 921600 baud — covers worst-case esp_ota_write
+// stalls (sector erase + write can spike to 100+ ms) plus any other tasks
+// briefly preempting the drain. RAM is cheap on the C6 (512 KB SRAM); this
+// is allocated only for the OTA window and freed afterward.
+#define OTA_STREAM_BUF_BYTES (64 * 1024)
 // Drain in 4 KB chunks to align with the flash sector size.
 #define OTA_DRAIN_CHUNK      4096
 
@@ -144,6 +148,13 @@ static void cleanup_and_release(ota_state_t *st)
     }
     s_state  = NULL;
     s_active = false;
+    // Resume MQTT + LiDAR regardless of outcome. On the success path the
+    // C6 is about to esp_restart() so these are brief no-ops; on failure
+    // paths we want both back so HA still talks to us and the kiosk gets
+    // distance/strength updates. Idempotent if either was never paused
+    // (early-failure paths in handle_begin).
+    panel_net_resume();
+    panel_lidar_resume();
 }
 
 static void hex_encode(const uint8_t *bytes, size_t len, char *out)
@@ -458,12 +469,23 @@ bool panel_ota_uart_handle_begin(const char *json, size_t len)
     s_state  = st;
     s_active = true;
 
+    // Pause MQTT + LiDAR — esp-mqtt's reconnect attempts (TLS handshakes)
+    // and the LiDAR's per-byte UART0 reads (~900 B/s) both compete with
+    // the OTA stream for Thread bandwidth, CPU, and interrupt latency.
+    // Both were observed contributing to UART1 RX driver overruns mid-
+    // transfer. cleanup_and_release calls the matching resume() functions
+    // on every exit path; on success the C6 reboots so the resumes are
+    // brief no-ops before the restart.
+    panel_net_pause();
+    panel_lidar_pause();
+
     BaseType_t ok = xTaskCreate(ota_task, "panel_ota_uart",
                                 6144, st, 9, &st->worker);
     if (ok != pdPASS)
     {
         ESP_LOGE(TAG, "failed to spawn ota worker task");
         esp_ota_abort(st->ota_handle);
+        // cleanup_and_release calls panel_net_resume; no duplicate needed.
         cleanup_and_release(st);
         send_result("error", "task spawn failed");
         return false;
