@@ -29,9 +29,10 @@ import asyncio
 import logging
 from typing import Any
 
+from .nmcli_util import run_nmcli
+
 log = logging.getLogger(__name__)
 
-NMCLI = "/usr/bin/nmcli"
 WLAN_IFNAME = "wlan0"
 SCAN_INTERVAL_S = 30
 
@@ -76,7 +77,7 @@ async def apply_wifi_connect(bridge, payload: dict[str, Any]) -> None:
     log.info("wifi_connect: ssid=%r security=%s", ssid, security)
 
     # Replace any existing profile with the same name so credentials are fresh.
-    rc, _, err = await _run_nmcli("connection", "delete", ssid, sudo=True)
+    rc, _, err = await run_nmcli("connection", "delete", ssid, sudo=True)
     if rc != 0 and "unknown connection" not in err.lower():
         log.info("wifi_connect: delete %r returned (rc=%d): %s", ssid, rc, err.strip())
 
@@ -100,12 +101,12 @@ async def apply_wifi_connect(bridge, payload: dict[str, Any]) -> None:
     else:  # "none" — open network
         add_args += ["wifi-sec.key-mgmt", "none"]
 
-    rc, _, err = await _run_nmcli(*add_args, sudo=True)
+    rc, _, err = await run_nmcli(*add_args, sudo=True)
     if rc != 0:
         await _publish_error(bridge, _trim_nm_error(err) or "Failed to create profile")
         return
 
-    rc, _, err = await _run_nmcli("connection", "up", ssid, sudo=True)
+    rc, _, err = await run_nmcli("connection", "up", ssid, sudo=True)
     if rc != 0:
         # Profile was created but activation failed; leave it in place so the
         # user can retry with a corrected password without re-scanning.
@@ -156,7 +157,7 @@ async def _publish_error(bridge, message: str) -> None:
 
 
 async def _scan_wifi(force_rescan: bool) -> tuple[list[dict[str, Any]], str | None]:
-    rc, out, err = await _run_nmcli(
+    rc, out, err = await run_nmcli(
         "-t", "-f", "IN-USE,SSID,SECURITY",
         "device", "wifi", "list",
         "--rescan", "auto" if force_rescan else "no",
@@ -191,7 +192,7 @@ async def _current_ssid() -> str:
     # Read the cached scan list (no forced rescan) and find the row marked
     # IN-USE=*. This gives the actual broadcast SSID rather than the
     # connection profile's name, which can drift from each other.
-    rc, out, _ = await _run_nmcli(
+    rc, out, _ = await run_nmcli(
         "-t", "-f", "IN-USE,SSID",
         "device", "wifi", "list",
         "--rescan", "no",
@@ -256,21 +257,3 @@ def _trim_nm_error(err: str) -> str:
     if len(text) > 240:
         text = text[:237] + "..."
     return text
-
-
-async def _run_nmcli(*args: str, sudo: bool = False) -> tuple[int, str, str]:
-    cmd: list[str] = ["sudo", "-n", NMCLI, *args] if sudo else [NMCLI, *args]
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, err = await proc.communicate()
-    except OSError as e:
-        return 127, "", str(e)
-    return (
-        proc.returncode if proc.returncode is not None else -1,
-        out.decode(errors="replace"),
-        err.decode(errors="replace"),
-    )

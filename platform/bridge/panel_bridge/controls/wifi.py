@@ -8,48 +8,30 @@ no polkit agent, so we go through sudo instead. Needs a sudoers entry
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
-log = logging.getLogger(__name__)
+from .nmcli_util import run_nmcli
 
-NMCLI = "/usr/bin/nmcli"
+log = logging.getLogger(__name__)
 
 
 async def _read_wifi_enabled() -> bool | None:
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            NMCLI, "-t", "radio", "wifi",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, err = await proc.communicate()
-    except OSError as e:
-        log.warning("wifi: nmcli not executable: %s", e)
+    rc, out, err = await run_nmcli("-t", "radio", "wifi")
+    if rc != 0:
+        log.warning("wifi: nmcli read failed (rc=%d): %s", rc, err.strip())
         return None
-    if proc.returncode != 0:
-        log.warning("wifi: nmcli read failed: %s", err.decode(errors="replace"))
-        return None
-    text = out.decode().strip()
-    return text == "enabled"
+    return out.strip() == "enabled"
 
 
 async def _set_wifi_enabled(on: bool) -> bool:
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "sudo", "-n", NMCLI, "radio", "wifi", "on" if on else "off",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, err = await proc.communicate()
-    except OSError as e:
-        log.warning("wifi: sudo/nmcli not executable: %s", e)
-        return False
-    if proc.returncode != 0:
+    rc, _, err = await run_nmcli(
+        "radio", "wifi", "on" if on else "off", sudo=True
+    )
+    if rc != 0:
         log.warning(
-            "wifi: sudo nmcli failed (is passwordless sudo configured?): %s",
-            err.decode(errors="replace"),
+            "wifi: sudo nmcli failed (rc=%d, is passwordless sudo configured?): %s",
+            rc, err.strip(),
         )
         return False
     return True
