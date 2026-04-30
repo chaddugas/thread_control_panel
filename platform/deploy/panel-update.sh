@@ -351,4 +351,20 @@ fi
 
 publish_status "done" "$VERSION"
 
-# trap will restart cog
+# Reboot to make the new install fully fresh:
+#  - cog restart at script exit reloads the UI bundle, but WPE-WebKit's
+#    HTTP cache has been observed to hold stale content even with
+#    Cache-Control: no-cache (see panel-ui-server.py); reboot bypasses
+#    that entirely.
+#  - localStorage / cookies / any in-process kiosk state survive a cog
+#    restart but not a reboot — clears any UI state that might be
+#    incompatible with the new bundle.
+#  - HA's update entity already shows success at this point because
+#    state/version flipped during verifying_c6 above; the ~30-45s
+#    "panel offline" during reboot is purely cosmetic.
+# Failure paths (rollback, healthcheck fail, etc.) intentionally do NOT
+# reboot — they exit via fail() which keeps the system up so the user
+# can SSH in and inspect.
+publish_status "rebooting"
+sudo /sbin/shutdown -r now
+# shutdown returns immediately; trap fires, then init takes over.

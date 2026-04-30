@@ -387,9 +387,13 @@ Full HA-triggered OTA round-trip (cmd/update → script → C6 reboot into new f
 
 - Single full HA-triggered OTA (cmd/update → script runs → C6 reboots into new firmware → state/version reports new version → no manual intervention) has not yet been observed end-to-end. beta.10 → beta.10+1 is the first time both fixes get exercised together by the same flow.
 
-### HA-side validation (chunk 3b)
+### Phase 3b — HA-side `update.PanelUpdateEntity` + post-update polish
 
-Defer until the integration's update.py is built.
+Open work for the next chunk:
+
+- **`update.py` in `platform/integration/thread_panel/`**, per the spec at the top of Phase 3 (PanelUpdateEntity reading `state/version` for installed, GitHub Releases API for latest, publishing `cmd/update` on install, subscribing to `state/update_status` for progress). Plus the `Include prereleases` config-flow option.
+- **End-to-end validation**: trigger an OTA from HA's update entity (not mosquitto_pub), watch the entity's progress UI render the phases coming over `state/update_status`, confirm the entity flips to "up to date" when the C6 reports the new version. This is the validation milestone for chunk 3b.
+- **Auto-reboot the Pi at end of successful OTA.** Currently the trap in `panel-update.sh` restarts cog, which combined with panel-ui-server's `Cache-Control: no-cache` on index.html should refresh the UI bundle. But WPE-WebKit's cache has a track record of holding stale content (see [panel-ui-server.py:5-15](../platform/deploy/panel-ui-server.py#L5-L15)) and `localStorage` / cookies persist across cog restarts regardless. A `sudo reboot` after the `done` publish makes the new install fully fresh — closes the gap with ~30–45s extra "panel offline" after `state/version` already reports the new version (so HA's entity already shows success). Failure paths must NOT reboot — keep the rollback flow as-is so the user can SSH in and inspect.
 
 ---
 

@@ -4,6 +4,16 @@ DOMAIN = "thread_panel"
 
 CONF_MANIFEST_YAML = "manifest_yaml"
 CONF_PANEL_ID = "panel_id"
+CONF_INCLUDE_PRERELEASES = "include_prereleases"
+DEFAULT_INCLUDE_PRERELEASES = False
+
+# GitHub repo the update entity polls for releases. cut-release substitutes
+# __REPO__ at release-build time using `git remote get-url origin`. For
+# in-tree dev (running this integration straight from the repo without
+# going through cut-release), the placeholder string just makes the API
+# call fail cleanly — latest_version stays None until a real release is
+# pulled.
+GITHUB_REPO = "__REPO__"
 
 TOPIC_AVAILABILITY = "thread_panel/{panel_id}/ha_availability"
 TOPIC_ROSTER = "thread_panel/{panel_id}/state/_roster"
@@ -23,6 +33,12 @@ TOPIC_CMD_RESYNC = "thread_panel/{panel_id}/cmd/resync"
 TOPIC_PANEL_AVAILABILITY = "thread_panel/{panel_id}/availability"
 TOPIC_PANEL_PROXIMITY = "thread_panel/{panel_id}/state/proximity"
 TOPIC_PANEL_AMBIENT_BRIGHTNESS = "thread_panel/{panel_id}/state/ambient_brightness"
+
+# Update flow — version retained by C6 on each MQTT connect, status not
+# retained (high-churn). Command published by HA on user-driven install.
+TOPIC_PANEL_VERSION = "thread_panel/{panel_id}/state/version"
+TOPIC_PANEL_UPDATE_STATUS = "thread_panel/{panel_id}/state/update_status"
+TOPIC_PANEL_CMD_UPDATE = "thread_panel/{panel_id}/cmd/update"
 
 # Panel-itself controls — bidirectional state + command channels for the
 # Pi-owned controls (display power, wifi radio, reboot).

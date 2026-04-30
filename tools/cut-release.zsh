@@ -445,12 +445,27 @@ PY
   rm -rf "$deploy_stage"
 
   # Integration zip — content_in_root: false in hacs.json, so the zip
-  # contains a thread_panel/ directory at root.
+  # contains a thread_panel/ directory at root. Staged through a temp
+  # tree so we can substitute __REPO__ in update.py (and any future
+  # repo-aware integration source) before zipping, leaving the source
+  # tree clean. Same pattern as the deploy tarball above.
   print ""
   print "→ thread_panel integration..."
+  local integ_stage="$staging/.integ-stage"
+  rm -rf "$integ_stage"
+  mkdir -p "$integ_stage"
   ( cd "$repo_root/platform/integration" && \
-    zip -qr "$staging/thread_panel-${bare_version}.zip" thread_panel \
-      -x '*/__pycache__/*' '*.pyc' ) || return 1
+    tar -cf - --exclude='__pycache__' --exclude='*.pyc' thread_panel ) \
+    | tar -xf - -C "$integ_stage" || return 1
+  for f in "$integ_stage"/thread_panel/*.py; do
+    [[ -f "$f" ]] || continue
+    if grep -q "__REPO__" "$f" 2>/dev/null; then
+      _cr_substitute_repo "$f" "$gh_repo" || return 1
+    fi
+  done
+  ( cd "$integ_stage" && \
+    zip -qr "$staging/thread_panel-${bare_version}.zip" thread_panel ) || return 1
+  rm -rf "$integ_stage"
 
   # install-pi.sh shipped loose at the release root for `curl -L
   # .../releases/latest/download/install-pi.sh | bash` bootstrap. Same

@@ -19,12 +19,19 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
 )
 
-from .const import CONF_MANIFEST_YAML, CONF_PANEL_ID, DOMAIN
+from .const import (
+    CONF_INCLUDE_PRERELEASES,
+    CONF_MANIFEST_YAML,
+    CONF_PANEL_ID,
+    DEFAULT_INCLUDE_PRERELEASES,
+    DOMAIN,
+)
 from .manifest_loader import ManifestError, parse_manifest
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,6 +39,7 @@ _LOGGER = logging.getLogger(__name__)
 YAML_SELECTOR = TextSelector(
     TextSelectorConfig(multiline=True, type=TextSelectorType.TEXT)
 )
+BOOL_SELECTOR = BooleanSelector()
 
 
 class ThreadPanelConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -77,12 +85,17 @@ class ThreadPanelConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class ThreadPanelOptionsFlow(config_entries.OptionsFlow):
-    """Edit an already-configured panel's manifest in place.
+    """Edit an already-configured panel's manifest + integration options.
 
-    On successful submit, updates the entry's data and triggers a reload
-    so the forwarder picks up the new entities. panel_id must stay the
-    same — it's the entry's unique_id anchor and changing it mid-flight
-    would corrupt HA's record of the device.
+    Two fields:
+      - manifest YAML — same shape as initial setup; updates entry.data
+        and triggers a reload so the forwarder picks up new entities.
+      - include_prereleases — controls whether the firmware update entity
+        considers GitHub prereleases as `latest_version`. Stored in
+        entry.options.
+
+    panel_id must stay the same — it's the entry's unique_id anchor and
+    changing it mid-flight would corrupt HA's record of the device.
     """
 
     async def async_step_init(
@@ -91,9 +104,15 @@ class ThreadPanelOptionsFlow(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
         current_yaml = self.config_entry.data.get(CONF_MANIFEST_YAML, "")
         current_panel_id = self.config_entry.data.get(CONF_PANEL_ID)
+        current_prereleases = self.config_entry.options.get(
+            CONF_INCLUDE_PRERELEASES, DEFAULT_INCLUDE_PRERELEASES
+        )
 
         if user_input is not None:
             yaml_text = user_input[CONF_MANIFEST_YAML]
+            include_prereleases = bool(
+                user_input.get(CONF_INCLUDE_PRERELEASES, DEFAULT_INCLUDE_PRERELEASES)
+            )
             try:
                 manifest = await self.hass.async_add_executor_job(
                     parse_manifest, yaml_text
@@ -117,10 +136,17 @@ class ThreadPanelOptionsFlow(config_entries.OptionsFlow):
                             CONF_PANEL_ID: manifest.panel_id,
                         },
                     )
+                    # async_create_entry's `data=` writes to entry.options.
+                    # The reload below re-reads both data + options, so
+                    # the update entity comes back with the new prereleases
+                    # filter and the forwarder with the new manifest.
                     await self.hass.config_entries.async_reload(
                         self.config_entry.entry_id
                     )
-                    return self.async_create_entry(title="", data={})
+                    return self.async_create_entry(
+                        title="",
+                        data={CONF_INCLUDE_PRERELEASES: include_prereleases},
+                    )
 
         return self.async_show_form(
             step_id="init",
@@ -129,6 +155,9 @@ class ThreadPanelOptionsFlow(config_entries.OptionsFlow):
                     vol.Required(
                         CONF_MANIFEST_YAML, default=current_yaml
                     ): YAML_SELECTOR,
+                    vol.Optional(
+                        CONF_INCLUDE_PRERELEASES, default=current_prereleases
+                    ): BOOL_SELECTOR,
                 }
             ),
             errors=errors,

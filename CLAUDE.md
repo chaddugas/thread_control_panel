@@ -48,6 +48,7 @@ panels/feeding_control/         # first product
 - **Stop at "ready to build" on firmware work** — the user runs builds, flashes, and hardware-in-the-loop verification themselves. Don't auto-run `idf.py build/flash/monitor`.
 - **One focused step per message during debugging or hardware bring-up.** Bundling "try A, then B, then C" forces the user to either skip ahead blindly or stop mid-list. Wait for the result before proposing the next step.
 - **Use the `idf` shell alias** to enter the ESP-IDF v6.0 environment when builds are required (don't source the activate script directly).
+- **Maintain `.gitmessage.txt` as you change things.** It's the staging area for the next commit message — first line is the subject, the rest is the body, written in the style of recent commits (per-file/per-component description, technical detail, why-not-just-what). Update it when you make a meaningful change and again any time you make follow-up changes that affect what the next commit should say. The user reads from this file when running the actual commit, so a stale or missing message means they get the previous commit's text or no message at all.
 
 ## Useful commands
 
