@@ -34,7 +34,13 @@ from .nmcli_util import run_nmcli
 log = logging.getLogger(__name__)
 
 WLAN_IFNAME = "wlan0"
-SCAN_INTERVAL_S = 30
+# Periodic scan / SSID republish interval. Was 30s under the original
+# poll-only design; safe to tighten now that nmcli_util.run_nmcli has a
+# 30s hard timeout (Commit B) and event-driven updates from
+# wifi_state's nmcli monitor task carry the live state path. 10s gives
+# a noticeably fresher network list in HA's dropdown when the user is
+# scanning, without meaningful nmcli load.
+SCAN_INTERVAL_S = 10
 
 # Guard against multiple emit_initial calls spawning duplicate loops.
 _loop_started = False
