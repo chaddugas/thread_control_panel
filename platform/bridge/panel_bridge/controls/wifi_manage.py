@@ -117,6 +117,19 @@ async def apply_wifi_connect(bridge, payload: dict[str, Any]) -> None:
     await _publish_current_ssid(bridge)
 
 
+async def refresh_state(bridge) -> None:
+    """Re-publish current WiFi state immediately.
+
+    Called from sibling modules after actions that should produce an
+    immediate user-visible state change (e.g. radio toggle in wifi.py),
+    so HA sees the result without waiting up to SCAN_INTERVAL_S for the
+    next periodic loop tick. wifi_error is intentionally NOT touched —
+    that channel is sticky until the next connect attempt clears it.
+    """
+    await _publish_current_ssid(bridge)
+    await _publish_scan(bridge, force_rescan=False)
+
+
 # ------------------------------ internals ------------------------------
 
 
@@ -189,23 +202,42 @@ async def _scan_wifi(force_rescan: bool) -> tuple[list[dict[str, Any]], str | No
 
 
 async def _current_ssid() -> str:
-    # Read the cached scan list (no forced rescan) and find the row marked
-    # IN-USE=*. This gives the actual broadcast SSID rather than the
-    # connection profile's name, which can drift from each other.
+    """Currently-connected SSID, or '' if not fully connected at IP layer.
+
+    Reads NM's actual device state rather than the scan-list IN-USE flag.
+    The scan-list flag stays set on the last AP even when the connection
+    has dropped at IP layer, which made the entity report "connected"
+    while SSH was timing out (see build_plan_v2.md Step 17b).
+
+    NM device state values (GENERAL.STATE field):
+        20   unavailable   (radio off)
+        30   disconnected  (radio on, no profile active)
+        40-90 connecting   (preparing / config / auth / IP setup)
+        100  connected     (fully up at IP layer)
+        110  deactivating
+        120  failed
+
+    Return the connection name only when STATE=100; anything else, "".
+    """
     rc, out, _ = await run_nmcli(
-        "-t", "-f", "IN-USE,SSID",
-        "device", "wifi", "list",
-        "--rescan", "no",
+        "-t", "-f", "GENERAL.STATE,GENERAL.CONNECTION",
+        "device", "show", WLAN_IFNAME,
     )
     if rc != 0:
         return ""
+    state = ""
+    connection = ""
     for line in out.splitlines():
-        if not line:
-            continue
-        parts = _parse_t_line(line)
-        if len(parts) >= 2 and parts[0] == "*":
-            return parts[1]
-    return ""
+        if line.startswith("GENERAL.STATE:"):
+            state = line[len("GENERAL.STATE:"):]
+        elif line.startswith("GENERAL.CONNECTION:"):
+            connection = line[len("GENERAL.CONNECTION:"):]
+    if not state.startswith("100"):
+        return ""
+    # Connection profile name. For panels created via apply_wifi_connect
+    # this matches the SSID exactly (con-name = ssid in our `nmcli
+    # connection add` invocation).
+    return connection
 
 
 def _security_to_keymgmt(sec: str) -> str | None:

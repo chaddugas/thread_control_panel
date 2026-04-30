@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ..events import log_event
+from . import wifi_manage
 from .nmcli_util import run_nmcli
 
 log = logging.getLogger(__name__)
@@ -45,8 +47,15 @@ async def apply_wifi_enabled(bridge, payload: dict[str, Any]) -> None:
     # Attempt the change. Whether it succeeds or not, we read the actual
     # state back below — so a failed action naturally reverts HA's
     # optimistic update on the next round trip.
-    await _set_wifi_enabled(value)
+    ok = await _set_wifi_enabled(value)
+    log_event(log, "wifi_action", action="radio_toggle", value=value, ok=ok)
     await emit_initial(bridge)
+    # Toggling the radio also changes SSID/scan results; refresh those
+    # too so HA sees the full state shift immediately rather than
+    # waiting up to SCAN_INTERVAL_S for the next periodic tick. This
+    # closes the "stays connected for minutes after toggle off"
+    # symptom from build_plan_v2.md Step 17b.
+    await wifi_manage.refresh_state(bridge)
 
 
 async def emit_initial(bridge) -> None:
