@@ -601,7 +601,14 @@ PY
     if [[ -n "$latest" ]]; then
       print "## Changes since $latest"
       print ""
-      git -C "$repo_root" --no-pager log --pretty=format:'- %s (%h)' "$latest"..HEAD
+      # Exclude the "Release vX.Y.Z" version-bump commit cut-release just
+      # produced — it's release-machinery noise, not a change for the user.
+      # Subject pattern is specific enough that legitimate commits won't
+      # match; if anything ever does, the user can edit the auto-notes.
+      git -C "$repo_root" --no-pager log \
+        --grep='^Release v' --invert-grep \
+        --pretty=format:'- %s (%h)' \
+        "$latest"..HEAD
       print ""
     else
       print "## Initial release"
