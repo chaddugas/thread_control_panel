@@ -27,6 +27,7 @@ REPO="${REPO:-__REPO__}"
 PANEL_ROOT="/opt/panel"
 TARGET_VERSION="${1:-latest}"
 STATUS_FILE="$PANEL_ROOT/update.status"
+LOG_FILE="$PANEL_ROOT/update.log"
 LOCKFILE="/var/run/panel-update.pid"
 
 # ===== concurrent-update protection =====
@@ -71,19 +72,62 @@ publish_status() {
 }
 
 fail() {
-    publish_status "failed" "$1"
+    local detail="$1"
+    # Brief pause so any pending stderr from the failing command makes
+    # it through tee into the log before we read.
+    sleep 0.3
+    if [ -s "$LOG_FILE" ]; then
+        # Cram the last few log lines into the status detail so HA's
+        # update entity (and anyone reading update.status) gets actual
+        # error text, not just a phase name. Newlines collapsed to | for
+        # JSON-friendliness; capped at 250 chars; full output stays in
+        # $LOG_FILE for `cat` after the fact.
+        local tail_text
+        tail_text=$(tail -8 "$LOG_FILE" \
+                     | tr -d '\r' \
+                     | tr '\n' '|' \
+                     | head -c 250)
+        publish_status "failed" "$detail — log tail: $tail_text"
+    else
+        publish_status "failed" "$detail"
+    fi
     exit 1
 }
 
-# ===== console takeover =====
+# ===== early same-version refusal =====
 #
-# Stop the kiosk so we can write status to tty1. Cog will be restarted on
-# script exit by the trap above. fbcon=rotate:3 (set in cmdline.txt by
+# If TARGET_VERSION is an explicit tag (not "latest") and matches the
+# version we're already running, refuse BEFORE the console takeover +
+# WiFi enable. Avoids wasted work + a visible kiosk flicker for the
+# common "you clicked Install on the version you're already on" case.
+# The "latest" case still has to wait for lib_resolve_version (needs
+# network) — second refusal fires later if that resolves to current.
+
+if [ "$TARGET_VERSION" != "latest" ] && [ -L "$PANEL_ROOT/current" ]; then
+    EARLY_CURRENT=$(basename "$(readlink "$PANEL_ROOT/current")")
+    if [ "$TARGET_VERSION" = "$EARLY_CURRENT" ]; then
+        # No console takeover yet — just write to status and exit.
+        printf '{"phase":"rejected","detail":"already on %s (no update needed)","ts":%d}\n' \
+            "$TARGET_VERSION" "$(date +%s)" > "$STATUS_FILE"
+        exit 0
+    fi
+fi
+
+# ===== console takeover + tee logging =====
+#
+# Stop the kiosk so we can write status to tty1. Cog is restarted on script
+# exit by the trap above. fbcon=rotate:3 (set in cmdline.txt by
 # install-pi.sh) means tty1 renders rotated to match the panel orientation.
+#
+# We tee all output to both /dev/tty1 (live screen) and $LOG_FILE
+# (persists across the cog restart that hides tty1 after we exit). fail()
+# reads from $LOG_FILE so the failure detail in update.status carries the
+# actual error text rather than just a phase name.
 
 sudo systemctl stop cog.service 2>/dev/null || true
 sudo chvt 1 2>/dev/null || true
-exec > /dev/tty1 2>&1
+: > "$LOG_FILE"
+exec > >(tee -a "$LOG_FILE" > /dev/tty1) 2>&1
 sudo setfont ter-132n 2>/dev/null || true
 
 # Initialize a fresh status file for this run
@@ -129,6 +173,19 @@ if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
     fail "couldn't resolve $TARGET_VERSION to a release tag"
 fi
 publish_status "resolved" "$VERSION"
+
+# Refuse if the resolved version is what we're already running. Otherwise
+# lib_extract_artifacts would rm -rf the live install dir (since
+# $PANEL_ROOT/current points at $PANEL_ROOT/versions/$VERSION/), wiping
+# the running venv mid-flight. install-pi.sh allows this for explicit
+# user-driven re-installs; HA-driven OTA shouldn't ever do it.
+if [ -n "$PREV_TARGET" ]; then
+    PREV_VERSION=$(basename "$PREV_TARGET")
+    if [ "$VERSION" = "$PREV_VERSION" ]; then
+        publish_status "rejected" "already on $VERSION (no update needed)"
+        exit 0
+    fi
+fi
 
 VERSION_DIR="$PANEL_ROOT/versions/$VERSION"
 STAGING="/tmp/panel-update-$VERSION"
