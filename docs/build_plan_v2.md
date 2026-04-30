@@ -333,15 +333,53 @@ For local testing without cut-release, both scripts honor `REPO=foo/bar` env var
 ### Pi-side validation (chunk 3a, manual via mosquitto_pub)
 
 ```
-mosquitto_pub -h <broker> -t 'thread_panel/feeding_control/cmd/update' \
-  -m '{"version":"v2.0.0-beta.4"}'
+mosquitto_pub -h <broker> -p 8883 -u mqtt_user -P "$PASS" --cafile <ca> \
+  -t 'thread_panel/feeding_control/cmd/update' \
+  -m '{"version":"v2.0.0-betaN","keep_wifi_on":true}'
 ```
 
 Watch the panel screen flip to console + scroll status; subscribe to `state/update_status` to see HA-side events:
 
 ```
-mosquitto_sub -h <broker> -t 'thread_panel/feeding_control/state/update_status' -v
+mosquitto_sub -h <broker> -p 8883 -u mqtt_user -P "$PASS" --cafile <ca> \
+  -t 'thread_panel/feeding_control/state/update_status' -v
 ```
+
+### Current status of chunk 3a (as of v2.0.0-beta.10)
+
+Both originally-blocking bugs from beta.9 have fixes in tree. The next OTA cut (beta.10) is the first end-to-end validation candidate — it pairs the bug-1 firmware fix that's already running on the C6 with the bug-2 Pi-side fix landing for the first time in beta.10's `panel-update.sh`.
+
+**What works:**
+
+- ✅ `cmd/update` flows HA → MQTT → C6 → UART → bridge → spawned `panel-update.sh`
+- ✅ Same-version refusal early in the script (no console takeover for redundant requests)
+- ✅ `keep_wifi_on` env var passed via cmd/update payload, honored by the script (SSH session survives)
+- ✅ All install-lib.sh phases run successfully on the Pi: download artifacts (sha-verified) → extract → create venv → swap symlink → render units → restart services → healthcheck
+- ✅ panel-flash flashes the C6 OTA partition via UART, sha verifies, `esp_ota_set_boot_partition` succeeds
+- ✅ Status reporting via `/opt/panel/update.status` works; bridge tails it and republishes as `state/update_status`
+- ✅ `verify-c6-version.py` correctly waits for the new version via the bridge WS feed (the state.py cache fix was needed for this — `panel_state` was previously keyed by type-only and version got overwritten)
+- ✅ When the C6 actually boots the new firmware, `state/version` updates and verify succeeds within seconds
+- ✅ Once the C6 is running new firmware, `panel_app_on_connected` calls `esp_ota_mark_app_valid_cancel_rollback` so the new version persists across reboots
+
+**Bugs that were blocking end-to-end success (now fixed in beta.10):**
+
+1. **`esp_restart()` didn't fire after OTA on the success path.** `cleanup_and_release()` called `panel_net_resume()` → `esp_mqtt_client_start()`, which registers shutdown handlers + spawns MQTT tasks doing TLS handshake. `esp_restart()` runs registered shutdown handlers, and the in-progress TLS handshake blocked them. Chip kept running on the OLD firmware even though `esp_ota_set_boot_partition` succeeded.
+   - **Fix in `panel_ota_uart.c` (beta.9):** success path skips `cleanup_and_release()` and goes straight to a 1s drain + `esp_restart()`. Failure paths still call cleanup. Comment in the source explains why explicitly.
+   - **State as of beta.10 cut:** C6 is verified running beta.9 (retained `state/version` reports `v2.0.0-beta.9` over MQTT). The fix is live on the chip. The next OTA (→ beta.10) is its first end-to-end validation.
+
+2. **Console takeover failed silently — `pi`/install-user could not write to `/dev/tty1`.** While cog runs, PAM (`PAMName=login`) chowns `/dev/tty1` to the kiosk user; on `systemctl stop cog.service` it reverts to `root:tty 600` — and the `tty` group has no permissions either, so being in `tty` group wouldn't have helped. With `set -u` only (no `set -e`), bash silently continues past a failed `exec >` redirect, so every `publish_status` echo went to the bridge-spawned DEVNULL stdout. The "blank screen" and "blinking cursor" symptoms across beta.4–beta.9 were all this. `setterm --blank 0 --powerdown 0` (added in beta.9) was a wrong-tree fix — blanking was never the issue.
+   - **Fix in `panel-update.sh` (beta.10):** `sudo chown "$USER" /dev/tty1` between `chvt 1` and `exec > /dev/tty1 2>&1`. Plus a defensive `[ -t 1 ]` check after the exec — if stdout still isn't a tty, append `console_takeover_failed` to update.status so this exact failure mode is visible next time instead of mysteriously absent. `install-pi.sh` adds the matching `chown $USER /dev/tty1` sudoers entry to its drop-in for cleanliness on fresh installs (existing Pis with the wide-open Pi-imager NOPASSWD:ALL drop-in don't need it for the chown to succeed, but tightening the dependency to a single targeted entry is the right architectural shape).
+   - **Verified pre-cut:** ran the takeover sequence as a standalone script on the Pi. `[ -t 1 ]` returned true post-exec (no failure log written), `setfont` + scrolled phase lines rendered visibly on the panel screen at the giant rotated Terminus font.
+
+**Workarounds previously in use (no longer needed after beta.10 ships):**
+
+- ~~Manual `cmd/reboot_c6` after each OTA — replaced by bug-1 fix.~~
+- ~~`cat /opt/panel/update.status` from SSH for visibility — replaced by bug-2 fix.~~
+- `keep_wifi_on=true` stays as a deliberate dev-iteration aid; not a workaround, just the way to keep an SSH session alive during testing.
+
+**Validation milestone — open going into beta.10:**
+
+- Single full HA-triggered OTA (cmd/update → script runs → C6 reboots into new firmware → state/version reports new version → no manual intervention) has not yet been observed end-to-end. beta.10 → beta.10+1 is the first time both fixes get exercised together by the same flow.
 
 ### HA-side validation (chunk 3b)
 

@@ -129,10 +129,24 @@ fi
 # output (pip etc.) is teed via run_logged() below for the same reason —
 # we earlier tried `exec > >(tee ...)` for one-stop-shop dual output but
 # the process substitution caused silent SIGPIPE termination.
+#
+# /dev/tty1 ownership: while cog runs, PAM (PAMName=login) chowns it to
+# the kiosk user. When cog stops, ownership reverts to root:tty 600 — and
+# the `tty` group has no permissions either, so just being in tty group
+# doesn't help. We sudo-chown the tty back to ourselves so `exec >` works.
+# The sudoers entry pinning user-and-target is in install-pi.sh's drop-in.
 
 sudo systemctl stop cog.service 2>/dev/null || true
 sudo chvt 1 2>/dev/null || true
+sudo chown "$USER" /dev/tty1 2>/dev/null || true
 exec > /dev/tty1 2>&1
+# Bash with `set -u` (and no `set -e`) does NOT exit on `exec >` redirect
+# failure — it just leaves stdout untouched and continues silently. If the
+# tty takeover above didn't actually land us on a tty, surface that fact
+# in update.status so the failure mode is debuggable instead of invisible.
+if [ ! -t 1 ]; then
+    printf '{"phase":"console_takeover_failed","detail":"exec > /dev/tty1 did not yield a tty (chown failed? sudoers missing chown /dev/tty1?)","ts":%d}\n' "$(date +%s)" >> "$STATUS_FILE"
+fi
 # Largest Terminus available on Debian Bookworm's console-setup package
 # (32px tall, 16px wide, bold). Upstream Terminus naming is "ter-132b" —
 # Debian renames as <charset>-Terminus<HxW>. Lat15 covers ASCII + western

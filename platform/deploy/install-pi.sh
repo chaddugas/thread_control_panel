@@ -162,6 +162,7 @@ $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl is-active *
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/chvt *
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/setfont *
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/setterm *
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/chown $INSTALL_USER /dev/tty1
 EOF
 sudo chmod 0440 /etc/sudoers.d/panel-bridge
 
