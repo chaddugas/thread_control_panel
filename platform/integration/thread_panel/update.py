@@ -392,20 +392,25 @@ class PanelUpdateEntity(PanelEntityBase, UpdateEntity):
             )
             return
 
-        topic = TOPIC_PANEL_CMD_UPDATE.format(panel_id=self._panel_id)
-        payload = json.dumps({"version": target}, separators=(",", ":"))
-        _LOGGER.info("%s: publishing %s ← %s", self.entity_id, topic, payload)
-        await mqtt.async_publish(self.hass, topic, payload, qos=0, retain=False)
-        # Optimistic in_progress + 0% flip — the first state/update_status
-        # message will overwrite both with the real phase. Without it
-        # there'd be a visible gap between the user clicking Install and
-        # HA showing progress. Tracking _pending_target_version here lets
+        # Flip in_progress + 0% BEFORE awaiting the MQTT publish so the
+        # state push to HA's frontend disables the Install button
+        # immediately on click. If we awaited publish first, the button
+        # would stay clickable for the full publish round-trip
+        # (HA -> broker ack), which can be several seconds depending on
+        # broker auth / TLS state. The first state/update_status message
+        # will overwrite update_percentage with the real phase
+        # percentage. Tracking _pending_target_version here lets
         # _on_version_message recognize when the install has actually
         # landed on the C6.
         self._pending_target_version = target
         self._attr_in_progress = True
         self._attr_update_percentage = 0
         self.async_write_ha_state()
+
+        topic = TOPIC_PANEL_CMD_UPDATE.format(panel_id=self._panel_id)
+        payload = json.dumps({"version": target}, separators=(",", ":"))
+        _LOGGER.info("%s: publishing %s ← %s", self.entity_id, topic, payload)
+        await mqtt.async_publish(self.hass, topic, payload, qos=0, retain=False)
 
 
 async def async_setup_entry(
