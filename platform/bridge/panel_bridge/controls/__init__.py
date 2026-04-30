@@ -22,7 +22,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from . import reboot, screen, update, wifi, wifi_manage
+from . import reboot, screen, update, wifi, wifi_manage, wifi_state
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +51,7 @@ CMD_HANDLERS: dict[str, ApplyFn] = {
 # plus a periodic background task.
 EXTRA_EMITTERS: list[EmitFn] = [
     wifi_manage.emit_initial,
+    wifi_state.emit_initial,
 ]
 
 
