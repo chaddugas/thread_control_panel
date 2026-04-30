@@ -110,7 +110,7 @@ class PanelAmbientBrightnessSensor(_PanelSensorBase):
 
 
 class PanelWifiSsidSensor(_PanelSensorBase):
-    """Currently connected SSID; empty string when disconnected."""
+    """Currently connected SSID; "Disconnected" when not connected."""
 
     _attr_name = "Connected Wi-Fi"
     _attr_icon = "mdi:wifi-check"
@@ -119,6 +119,7 @@ class PanelWifiSsidSensor(_PanelSensorBase):
     def __init__(self, panel_id: str) -> None:
         super().__init__(panel_id)
         self._attr_unique_id = f"thread_panel_{panel_id}_wifi_ssid"
+        self._attr_native_value = "Disconnected"
 
     async def async_added_to_hass(self) -> None:
         # Override the base's template-format step because the panel-state
@@ -131,13 +132,15 @@ class PanelWifiSsidSensor(_PanelSensorBase):
 
     def _apply_state(self, data: dict[str, Any]) -> None:
         value = data.get("value")
-        # Show None (→ "unknown" in HA) when disconnected, so the entity
-        # state visually distinguishes "no wifi" from a literally-empty SSID.
-        self._attr_native_value = value if value else None
+        # Empty string from the bridge means "not currently connected"
+        # (radio off, no profile, mid-connect, etc.). Surface that as
+        # "Disconnected" rather than None — HA renders None as "Unknown",
+        # which trains the user to ignore the entity.
+        self._attr_native_value = value if value else "Disconnected"
 
 
 class PanelWifiErrorSensor(_PanelSensorBase):
-    """Last connect-attempt error; empty string when last attempt succeeded."""
+    """Last connect-attempt error; "No error" when last attempt succeeded."""
 
     _attr_name = "Wi-Fi Error"
     _attr_icon = "mdi:wifi-alert"
@@ -146,6 +149,7 @@ class PanelWifiErrorSensor(_PanelSensorBase):
     def __init__(self, panel_id: str) -> None:
         super().__init__(panel_id)
         self._attr_unique_id = f"thread_panel_{panel_id}_wifi_error"
+        self._attr_native_value = "No error"
 
     async def async_added_to_hass(self) -> None:
         await PanelEntityBase.async_added_to_hass(self)
@@ -156,7 +160,62 @@ class PanelWifiErrorSensor(_PanelSensorBase):
 
     def _apply_state(self, data: dict[str, Any]) -> None:
         value = data.get("value")
-        self._attr_native_value = value if value else None
+        # Empty string from the bridge means "no current error" — the
+        # bridge clears it explicitly on a successful connect. Surface
+        # that as "No error" rather than None so the entity reads
+        # cleanly in steady state instead of showing as Unknown.
+        self._attr_native_value = value if value else "No error"
+
+
+# Display map for the wifi_state enum. Bridge publishes lowercase values
+# from controls/wifi_state.py (disabled/disconnected/connecting/connected/error);
+# we capitalize for display and use the capitalized strings as the enum
+# options so SensorDeviceClass.ENUM's option-validation matches.
+_WIFI_STATE_DISPLAY: dict[str, str] = {
+    "disabled": "Disabled",
+    "disconnected": "Disconnected",
+    "connecting": "Connecting",
+    "connected": "Connected",
+    "error": "Error",
+}
+
+
+class PanelWifiStateSensor(_PanelSensorBase):
+    """Single source of truth for "what's the WiFi doing right now".
+
+    Subscribes to the state/wifi_state topic written by the bridge's
+    controls/wifi_state.py — that module derives one of five enum
+    values from NM's actual device state and publishes whenever it
+    changes. This sensor surfaces those changes in HA so dashboards
+    and automations have one place to read the panel's WiFi
+    connectivity at any moment.
+    """
+
+    _attr_name = "Wi-Fi State"
+    _attr_icon = "mdi:wifi-cog"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = list(_WIFI_STATE_DISPLAY.values())
+    _state_topic_template = TOPIC_PANEL_STATE
+
+    def __init__(self, panel_id: str) -> None:
+        super().__init__(panel_id)
+        self._attr_unique_id = f"thread_panel_{panel_id}_wifi_state"
+
+    async def async_added_to_hass(self) -> None:
+        await PanelEntityBase.async_added_to_hass(self)
+        topic = TOPIC_PANEL_STATE.format(panel_id=self._panel_id, name="wifi_state")
+        self._unsubs.append(
+            await mqtt.async_subscribe(self.hass, topic, self._on_state_message)
+        )
+
+    def _apply_state(self, data: dict[str, Any]) -> None:
+        value = data.get("value")
+        if not isinstance(value, str):
+            return
+        # Unknown enum values (forward-compat: bridge adds a new state
+        # value before HA-side update) fall through as the raw string;
+        # SensorDeviceClass.ENUM will log a warning but display it.
+        self._attr_native_value = _WIFI_STATE_DISPLAY.get(value, value)
 
 
 async def async_setup_entry(
@@ -171,5 +230,6 @@ async def async_setup_entry(
             PanelAmbientBrightnessSensor(panel_id),
             PanelWifiSsidSensor(panel_id),
             PanelWifiErrorSensor(panel_id),
+            PanelWifiStateSensor(panel_id),
         ]
     )
