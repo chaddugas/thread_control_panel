@@ -238,7 +238,7 @@ cut-release() {
   branch=$(git -C "$repo_root" rev-parse --abbrev-ref HEAD)
   if [[ "$branch" != "main" && "$branch" != "master" ]]; then
     print "cut-release: current branch is '$branch', expected main/master."
-    gum confirm "Continue anyway?" || return 1
+    gum confirm "Continue anyway?" --affirmative="Continue" --negative="Abort" || return 1
   fi
 
   # ----- unpushed commits notice -----
@@ -289,7 +289,7 @@ cut-release() {
   if ( cd "$repo_root" && gh release view "$new_version" >/dev/null 2>&1 ); then
     print ""
     print -u2 "cut-release: a GitHub release for $new_version already exists (likely leftover from a previous failed run)."
-    if gum confirm "Delete the existing release and continue?"; then
+    if gum confirm "Delete the existing release and continue?" --affirmative="Delete & continue" --negative="Abort"; then
       ( cd "$repo_root" && gh release delete "$new_version" --yes ) || {
         print -u2 "cut-release: failed to delete existing release"
         return 1
@@ -305,7 +305,7 @@ cut-release() {
   print ""
   print "Will tag, push, build artifacts, and publish: $new_version"
   (( is_prerelease )) && print "  (marked as prerelease — \`hacs.json\` Include-prereleases must be on for HACS to surface it)"
-  gum confirm "Proceed?" || { print "Aborted."; return 1 }
+  gum confirm "Proceed?" --affirmative="Cut release" --negative="Abort" || { print "Aborted."; return 1 }
 
   # ----- bump integration manifest.json -----
   local manifest_path="$repo_root/platform/integration/thread_panel/manifest.json"
@@ -621,7 +621,7 @@ PY
   print "─────────────────────────"
   print ""
 
-  if gum confirm "Edit notes before publishing?" --default=No; then
+  if ! gum confirm "Accept auto-generated notes?" --default=Yes --affirmative="Use auto-notes" --negative="Edit"; then
     ${EDITOR:-vi} "$notes_file"
   fi
 

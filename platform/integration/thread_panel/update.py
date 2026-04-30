@@ -245,6 +245,16 @@ class PanelUpdateEntity(PanelEntityBase, UpdateEntity):
 
     @callback
     def _on_update_status_message(self, msg) -> None:
+        # Skip retained messages. The C6 publishes every panel_state envelope
+        # (including update_status) with retain=1 in panel_app.c, so on HA
+        # restart the broker replays the last terminal phase from the prior
+        # install — which would (incorrectly) drive the entity into the
+        # in_progress=True hold state with update_percentage=100. update_status
+        # is an event stream, not state; we only want fresh phases. The
+        # bridge's update_status.py tail loop has the same "seek to end on
+        # first sight" policy.
+        if msg.retain:
+            return
         try:
             data = json.loads(msg.payload)
         except (ValueError, TypeError):

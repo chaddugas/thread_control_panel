@@ -39,28 +39,29 @@ Code is in tree (update.py, OptionsFlow with prereleases toggle, post-OTA reboot
 4. ~~HACS doesn't substitute `{version}` in hacs.json's `filename`~~ ✅ FIXED in beta.19 — filename is now static `thread_panel.zip`; cut-release writes that name; manifest.json matcher updated.
 5. ~~Most-recent release wasn't actually most-recent in `latest_version`~~ ✅ FIXED in beta.20 — GitHub's /releases endpoint sorts by tag name lex desc, not chronological. With semver tags `v2.0.0-beta.9` sorts before `v2.0.0-beta.19`. update.py now sorts by `created_at` itself before picking.
 
-**Pre-beta.21 changes (in tree, awaiting validation):**
+**Beta.21 results:**
 
-Three fixes landed in [update.py](../platform/integration/thread_panel/update.py) targeting A and B together:
+- ✅ A is fixed. The `async_release_notes` override removed the "Unknown error" banner.
+- ❌ New regression: at HA startup the entity loaded with `in_progress=true` and `update_percentage=100` even though no install was running. Cause: `state/update_status` is published retained by the C6 (panel_app.c line 245 — every `panel_state` envelope is published with retain=1), so on HA restart the broker replays the last terminal phase from the previous OTA. The new post-`done` hold state in beta.21 interprets that retained `done`/`rebooting` as a fresh terminal-success signal and enters the wait-for-version-match state with the 120s timer. Pre-beta.21 logic was tolerant of this because terminal phases unconditionally set `in_progress=False` — the new state machine surfaces the underlying retain bug.
 
-1. **Override `async_release_notes`** to return the full GitHub release body. HA truncates `release_summary` at 255 chars but `release_notes` has no limit. Strong A candidate: declaring `RELEASE_NOTES` feature support without overriding the method left HA's frontend fetching null notes via WebSocket, which surfaces in some HA frontend paths as "Unknown error" on the entity panel even when the entity is otherwise healthy.
-2. **`PHASE_PERCENTAGES` map + `UpdateEntityFeature.PROGRESS`** — addresses B directly. Each `publish_status` phase from panel-update.sh maps to a coarse percent (5–100); `_attr_update_percentage` is set in `_on_update_status_message` alongside `_attr_in_progress`. HA's progress bar should now render during install.
-3. **Hold `in_progress=True` past `done`/`rebooting` until `state/version` reports the target.** Tracks `_pending_target_version` set in `async_install`; flipped False either when version matches or after a 120s timeout. Closes a window where HA's frontend evaluated the install before the C6 had rebooted and republished, then cached a stale failure. This is also a candidate A fix.
+**Pre-beta.22 fix (in tree, awaiting validation):**
 
-**Still open as of pre-beta.21:**
+`_on_update_status_message` now ignores retained messages (`if msg.retain: return`). update_status is an event stream, not state — there's no scenario where replaying a stale terminal phase at startup is correct. Consistent with the bridge's `update_status.py` tail loop which already seeks to end on first sight of `/opt/panel/update.status` for the same reason.
 
-A. **"Unknown error" alert on the entity panel.** Beta.20 still shows the red banner even when `state=off` (installed == latest). Three candidate causes addressed above; expecting the `async_release_notes` override to be the actual fix, with the post-`done` hold as defense-in-depth. If beta.21 still shows the banner, next moves: temporarily drop `RELEASE_NOTES` from `supported_features` to confirm/rule-out the notes path, and check HA logs at the moment the more-info dialog opens for any traceback.
+**Still open as of pre-beta.22:**
 
-B. **`update_percentage` drives the install progress UI.** Pre-beta.21 had `in_progress=True` but no percentage, which HA renders as no visible install affordance. Now wired up. Confirm during a real install in beta.21+.
+B. **`update_percentage` drives the install progress UI.** PHASE_PERCENTAGES + `UpdateEntityFeature.PROGRESS` landed in beta.21; need a real install to confirm the progress bar renders.
 
-C. **Phase 3b validation milestone status:** install button works end-to-end. Outstanding: clean entity panel during steady state, visible progress feedback during install. Both addressed by the above; awaiting beta.21 to test.
+C. **Post-`done` version-match hold.** Tracks `_pending_target_version` set in async_install, releases on version match or 120s timeout. Need a real install to confirm the entity stays in_progress through the C6 reboot and flips clean when the new version arrives.
 
-**Suggested validation order in beta.21:**
+**Suggested validation order in beta.22:**
 
-1. After cutting beta.21 and installing it via HACS → restart HA → open the entity panel for `update.feeding_control_firmware`. If no "Unknown error" banner: A is fixed by the `async_release_notes` override. If still showing: capture HA logs around the dialog open and proceed to drop `RELEASE_NOTES` as a probe.
-2. Note: there are TWO update entities visible — ours (`update.feeding_control_firmware`, friendly_name "Feeding Control Firmware", supported_features=19/23, device_class=firmware) and HACS's auto-generated `update.thread_panel_update` (friendly_name "Thread Panel Update", tracks latest stable for HACS, no device_class). Don't confuse the two when capturing diagnostic state.
-3. Cut a beta.22 if anything else needs to land, then trigger an OTA from the entity to validate B: watch for a progress bar during the install; entity should remain in_progress through the C6 reboot until `state/version` reports the new tag, then flip to "Up-to-date" cleanly. `mosquitto_sub -t 'thread_panel/feeding_control/state/update_status' -v` confirms phases are flowing if the UI doesn't reflect them.
-4. Once A and B both check out in a real install, Phase 3b is genuinely shipped.
+1. Cut beta.22, install via HACS, restart HA. Entity should load with `in_progress=False`, `update_percentage=None`, no "Unknown error". (If `update_percentage` shows the last phase number even with `in_progress=False`, that's harmless — HA only renders it during in_progress.)
+2. Note: there are TWO update entities visible — ours (`update.feeding_control_firmware`, friendly_name "Feeding Control Firmware", supported_features=23, device_class=firmware) and HACS's auto-generated `update.thread_panel_update` (friendly_name "Thread Panel Update", tracks latest stable for HACS, no device_class). Don't confuse the two when capturing diagnostic state.
+3. Trigger an OTA from the entity. Watch for the progress bar climbing through the phase percentages. Entity should stay in_progress through the C6 reboot (~30-45s gap between `done` MQTT phase and the new `state/version`), then flip to "Up-to-date" cleanly when state/version arrives.
+4. Once steps 1–3 all check out, Phase 3b is genuinely shipped.
+
+**Architectural debt surfaced**: the firmware retain-everything pattern is wrong for event-stream topics like `update_status`. The integration-side fix is correct and ships immediately, but the firmware should distinguish state vs. event topics. Logged under Technical Debt below.
 
 ## Goals
 
@@ -669,7 +670,7 @@ Interactions with other steps:
 
 ### Outstanding
 
-(none yet — V2 work hasn't started)
+- **Firmware retains every panel_state envelope, including event-stream topics.** [panel_app.c:245](../panels/feeding_control/firmware/main/panel_app.c#L245) publishes all `panel_state` messages with `retain=1`. That's correct for state topics (`wifi_ssid`, `version`, etc.) where new subscribers should immediately see the current value. It's wrong for event-stream topics like `update_status`, where retained replays mean "ghost installs" appear at HA startup. The integration-side fix in beta.22 (skip `msg.retain` on `_on_update_status_message`) papers over this, but the architectural fix is to teach the C6 which envelopes are events vs. state and pass the correct retain flag. Currently the bridge sends a flat `panel_state` envelope with no event/state distinction; would need a schema bump (e.g., `"type":"panel_event"` vs `"type":"panel_state"`) and a corresponding split in the C6 publish path. Low urgency now that the integration ignores stale retains, but worth doing before adding more event-stream topics.
 
 ### Resolved
 
