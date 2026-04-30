@@ -186,10 +186,21 @@ class PanelUpdateEntity(PanelEntityBase, UpdateEntity):
             )
             return
 
+        # GitHub's /releases endpoint sorts by tag name (lex desc), NOT
+        # by created_at, despite the docs' claim. With semver tags, this
+        # means "v2.0.0-beta.9" sorts BEFORE "v2.0.0-beta.19" (because "9"
+        # > "1" alphabetically), so picking the API's index 0 gives the
+        # lex-greatest tag, not the most recently created. Sort defensively
+        # by `created_at` desc here so the iteration below picks the
+        # actually-most-recent release.
+        sorted_releases = sorted(
+            (r for r in releases if isinstance(r, dict)),
+            key=lambda r: r.get("created_at") or "",
+            reverse=True,
+        )
+
         chosen = None
-        for release in releases:
-            if not isinstance(release, dict):
-                continue
+        for release in sorted_releases:
             if release.get("draft"):
                 continue
             if release.get("prerelease") and not self._include_prereleases:
