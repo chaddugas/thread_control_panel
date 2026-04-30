@@ -25,7 +25,32 @@ When V2 ships and the V2 patterns become "current production state," migrate the
 Phase 1 (artifact-based releases + repo restructure) ✅ DONE.
 Phase 2 (C6 UART OTA receiver + panel-flash CLI) ✅ DONE.
 Phase 3a (Pi-side update orchestration: cmd/update → panel-update.sh → C6 reboot) ✅ DONE — validated end-to-end through beta.11 with both originally-blocking bugs fixed.
-Phase 3b (HA-side `update.PanelUpdateEntity`) — **(next up)**.
+Phase 3b (HA-side `update.PanelUpdateEntity`) — **in progress**, code written, end-to-end validation blocked. See "Phase 3b — open issues" below.
+
+### Phase 3b — open issues (resume here)
+
+Code is in tree (update.py, OptionsFlow with prereleases toggle, post-OTA reboot in panel-update.sh, off-main release commit logic in cut-release.zsh). The integration loads, the firmware update entity exists on the device card, MQTT-side `installed_version` subscription works (verified showing the right version from the retained `state/version` topic).
+
+**Still open as of last session:**
+
+1. **`latest_version` stays null after toggling "Include prereleases" in OptionsFlow.** The toggle and reload appear to take effect, HA was restarted, but the GitHub poll never populates `latest_version`. Two possible causes, not yet disambiguated:
+   - **OptionsFlow ordering bug (now fixed in tree):** the original code called `await async_reload(...)` BEFORE `return async_create_entry(data={...})`, so the reload ran with old options and the new options were saved post-reload but the in-memory entity never re-read them. Fix landed: removed the manual reload, added an `entry.add_update_listener(_async_reload_on_change)` in `__init__.async_setup_entry`, OptionsFlow now just returns `async_create_entry` and the framework triggers reload via the listener (standard HA pattern). Lands in beta.18+.
+   - **Possibility the GitHub poll itself fails silently:** the poll wraps in `try/except Exception` and logs a warning; if no warning appears in HA logs and the option is genuinely True, something else is off (network, API shape, filter logic). Diagnostic: HA logs filtered for `"GitHub releases poll"`, plus inspecting `/config/.storage/core.config_entries` for the entry's `options.include_prereleases` value to verify the toggle actually persisted.
+
+2. **HACS state caching across `content_in_root` flips.** When the user tried beta.13 → beta.14 (briefly with `content_in_root: true`) → beta.15 → beta.16, beta.16 install kept failing with `"No manifest.json file found '/manifest.json'"` (leading slash). Root cause: `HacsIntegrationRepository.__init__` sets `self.content.path.remote = "custom_components"` once, and the `if content_in_root: path.remote = ""` branch from beta.14 left the in-memory object's `path.remote` empty. When beta.16 came along with `content_in_root: false`, the conditional `if path.remote == "custom_components"` no longer matched, so `path.remote` stayed `""` → manifest_path = `"/manifest.json"`. **Workaround used:** delete device + integration + custom repo from HACS, restart HA, re-add the custom repo from scratch. Forces fresh `HacsIntegrationRepository` instance with correct initial `path.remote`. After this, beta.16 installed cleanly. Not something we can fix from our side; HACS bug. Worth a note here so it doesn't bite future-you.
+
+3. **Doubled-path bug in cut-release's off-main commit (FIXED in tree, breaks beta.17).** Beta.17's tag tree had `custom_components/thread_panel/thread_panel/manifest.json` (notice `thread_panel` twice). Cause: between beta.16 and beta.17 the `custom_components/thread_panel/` directory was left empty in the working tree (`git reset --hard` undoes tracked file content but doesn't remove now-untracked empty dirs), and `cp -R src dst` where dst already exists puts src INSIDE dst instead of as dst — classic Unix `cp` gotcha. Fix landed: `rm -rf custom_components` before the `mkdir + cp`. Lands in beta.18+.
+
+4. **`cut-release` is a sourced zsh function whose definition lives in shell memory after first `source`.** Already noted under Step 18 with three plausible fix options. Bit us in beta.15 (off-main logic landed in file but old in-memory function fired). Workaround: re-source the file in any shell that's about to run cut-release after edits. The "doubled path" bug above wasn't this — beta.17 cut from a freshly-sourced shell, the bug was real.
+
+5. **Phase 3b validation milestone NOT YET hit.** "User clicks Install in HA's update entity → entity progresses through phases → Pi reboots → entity reports up-to-date" hasn't happened end-to-end. Closest we got: beta.16 installed in HACS, entity exists, `installed_version` populated, but `latest_version` is null so the Install button isn't actionable. Once #1 above resolves, this should fall into place — Phase 3a already validated the OTA mechanics end-to-end with mosquitto_pub, so the only new thing to test for 3b is the HA-entity-driven path.
+
+**Suggested resume order next session:**
+
+1. Cut beta.18 (with #3 fix in cut-release re-sourced before running). Verify the tag tree has `custom_components/thread_panel/manifest.json` at the right depth (no doubling). HACS install should succeed cleanly.
+2. After beta.18 is installed via HACS, toggle Include Prereleases in the integration's options. With the OptionsFlow fix from #1, the reload should pick up the new option and `latest_version` should populate within seconds.
+3. If `latest_version` populates, click Install. Watch for full Phase 3b end-to-end success (entity progresses, Pi reboots, entity flips to up-to-date).
+4. If `latest_version` still null after beta.18: check HA logs for `"GitHub releases poll"` warnings, and check `/config/.storage/core.config_entries` for the entry's `options.include_prereleases` value. Diagnose from there.
 
 ## Goals
 
