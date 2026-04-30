@@ -303,7 +303,19 @@ static void ota_task(void *arg)
 
     ESP_LOGI(TAG, "OTA complete (%u bytes, sha256 ok). Rebooting in 1s...",
              (unsigned)written);
-    cleanup_and_release(st);
+
+    // Deliberately do NOT call cleanup_and_release here — its
+    // panel_net_resume() restarts the MQTT client, which registers
+    // shutdown handlers that block esp_restart(). Empirically observed:
+    // calling resume here makes the reboot never fire (chip keeps
+    // running on old firmware even though set_boot_partition succeeded).
+    //
+    // The chip is about to reset and wipe RAM anyway; freeing st /
+    // tearing down the stream buffer is unnecessary tidiness. Just
+    // mark our state inactive in case anything checks before the reset
+    // takes effect.
+    s_state  = NULL;
+    s_active = false;
 
     // Brief delay so the result envelope drains over UART before reboot.
     vTaskDelay(pdMS_TO_TICKS(1000));

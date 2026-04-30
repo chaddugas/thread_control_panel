@@ -161,6 +161,7 @@ $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl start cog.service
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl is-active *
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/chvt *
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/setfont *
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/setterm *
 EOF
 sudo chmod 0440 /etc/sudoers.d/panel-bridge
 

@@ -138,6 +138,10 @@ exec > /dev/tty1 2>&1
 # Debian renames as <charset>-Terminus<HxW>. Lat15 covers ASCII + western
 # European; if a panel ever needs Cyrillic/Greek/etc, swap charset prefix.
 sudo setfont Lat15-TerminusBold32x16 2>/dev/null || true
+# Disable console blanking + DPMS so the screen doesn't go dark during
+# long quiet phases (creating_venv can sit silent for ~60s while pip
+# installs). --term linux to apply to /dev/tty1 specifically.
+sudo setterm --term linux --blank 0 --powerdown 0 2>/dev/null || true
 
 # Initialize fresh log + status files for this run
 : > "$LOG_FILE"
