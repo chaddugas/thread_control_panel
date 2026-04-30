@@ -123,6 +123,23 @@ lib_update_installed_json
 echo "→ Adding $INSTALL_USER to graphics/input groups..."
 sudo usermod -aG video,input,render "$INSTALL_USER"
 
+# By default Pi OS journals live in /run/log/journal/ (tmpfs), so every
+# reboot wipes bridge logs from the prior boot. Panels reboot frequently
+# during dev and post-mortem debugging matters precisely after a
+# problematic boot, so persistent journals are worth the disk cost.
+# Cap retention at 200M total / 2-week age so SD cards don't slowly fill.
+echo "→ Configuring persistent journald (/var/log/journal/, 200M / 2-week)..."
+sudo mkdir -p /var/log/journal
+sudo mkdir -p /etc/systemd/journald.conf.d
+sudo tee /etc/systemd/journald.conf.d/panel.conf >/dev/null <<'EOF'
+[Journal]
+Storage=persistent
+SystemMaxUse=200M
+SystemMaxFileSize=20M
+MaxRetentionSec=2week
+EOF
+sudo systemctl restart systemd-journald
+
 echo "→ Disabling getty on tty1 (so sway/cog can own the framebuffer)..."
 sudo systemctl disable getty@tty1.service 2>/dev/null || true
 sudo systemctl stop getty@tty1.service 2>/dev/null || true
