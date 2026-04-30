@@ -36,6 +36,8 @@ import logging
 from datetime import timedelta
 from typing import Any
 
+import aiohttp
+
 from homeassistant.components import mqtt
 from homeassistant.components.update import (
     UpdateDeviceClass,
@@ -322,7 +324,9 @@ class PanelUpdateEntity(PanelEntityBase, UpdateEntity):
         url = GITHUB_RELEASES_URL.format(repo=GITHUB_REPO)
         session = async_get_clientsession(self.hass)
         try:
-            async with session.get(url, timeout=GITHUB_TIMEOUT_SEC) as resp:
+            async with session.get(
+                url, timeout=aiohttp.ClientTimeout(total=GITHUB_TIMEOUT_SEC)
+            ) as resp:
                 resp.raise_for_status()
                 releases = await resp.json()
         except Exception as err:  # noqa: BLE001 — network errors are routine
