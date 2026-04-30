@@ -36,7 +36,20 @@ async def apply_update(bridge: Any, payload: dict) -> None:
         log.error("panel_cmd update: %s not found — can't dispatch", UPDATE_SCRIPT)
         return
 
-    log.info("panel_cmd update: spawning %s %s (detached)", UPDATE_SCRIPT, version)
+    # Optional dev flag: caller passes "keep_wifi_on": true in the
+    # cmd/update payload to skip the post-update wifi-off step. Useful
+    # during iteration so the SSH session doesn't drop after every
+    # test update. Defaults to off (production wants wifi disabled).
+    keep_wifi_on = bool(payload.get("keep_wifi_on", False))
+
+    env = os.environ.copy()
+    if keep_wifi_on:
+        env["PANEL_KEEP_WIFI_ON"] = "1"
+
+    log.info(
+        "panel_cmd update: spawning %s %s (detached, keep_wifi_on=%s)",
+        UPDATE_SCRIPT, version, keep_wifi_on,
+    )
     # start_new_session=True puts the child in a new session + process
     # group so it isn't tied to the bridge's tty / process group, which
     # combined with KillMode=process in panel-bridge.service means the
@@ -44,6 +57,7 @@ async def apply_update(bridge: Any, payload: dict) -> None:
     # partway through its own flow.
     subprocess.Popen(  # noqa: S603 — UPDATE_SCRIPT is a fixed path
         [UPDATE_SCRIPT, version],
+        env=env,
         start_new_session=True,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,

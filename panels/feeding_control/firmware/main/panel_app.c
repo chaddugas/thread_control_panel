@@ -569,6 +569,9 @@ void panel_app_on_connected(esp_mqtt_client_handle_t client)
 {
     // Publish current firmware version retained — Phase 3's HA
     // update.panel_firmware entity reads this as installed_version.
+    // Also forward to the Pi as a panel_state envelope so the bridge
+    // caches it and panel-update.sh can verify post-flash via the WS
+    // feed without needing MQTT broker credentials.
     {
         char ver_payload[96];
         int n = snprintf(ver_payload, sizeof(ver_payload),
@@ -577,6 +580,14 @@ void panel_app_on_connected(esp_mqtt_client_handle_t client)
         {
             esp_mqtt_client_publish(client, PANEL_TOPIC_STATE_VERSION,
                                     ver_payload, n, 1, 1);
+        }
+        char uart_payload[128];
+        int u = snprintf(uart_payload, sizeof(uart_payload),
+                         "{\"type\":\"panel_state\",\"name\":\"version\","
+                         "\"version\":\"%s\"}", PANEL_VERSION);
+        if (u > 0 && u < (int)sizeof(uart_payload))
+        {
+            (void)forward_to_pi_uart(uart_payload, u);
         }
     }
 

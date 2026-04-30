@@ -56,19 +56,23 @@ publish_status() {
     local detail="${2:-}"
     local now
     now=$(date +%s)
+    local detail_esc=""
     if [ -n "$detail" ]; then
-        # Escape any " in the detail to keep the JSON valid (rare in practice).
-        detail=${detail//\"/\\\"}
-        printf '{"phase":"%s","detail":"%s","ts":%d}\n' "$phase" "$detail" "$now" >> "$STATUS_FILE"
+        # Escape any " in the detail to keep the JSON valid.
+        detail_esc=${detail//\"/\\\"}
+        printf '{"phase":"%s","detail":"%s","ts":%d}\n' "$phase" "$detail_esc" "$now" >> "$STATUS_FILE"
     else
         printf '{"phase":"%s","ts":%d}\n' "$phase" "$now" >> "$STATUS_FILE"
     fi
-    # Also write to the screen — the user is probably watching the panel.
+    local screen_msg
     if [ -n "$detail" ]; then
-        echo "[$phase] $detail"
+        screen_msg="[$phase] $detail"
     else
-        echo "[$phase]"
+        screen_msg="[$phase]"
     fi
+    # To screen (stdout = /dev/tty1) AND to $LOG_FILE.
+    echo "$screen_msg"
+    echo "$screen_msg" >> "$LOG_FILE"
 }
 
 fail() {
@@ -113,25 +117,35 @@ if [ "$TARGET_VERSION" != "latest" ] && [ -L "$PANEL_ROOT/current" ]; then
     fi
 fi
 
-# ===== console takeover + tee logging =====
+# ===== console takeover =====
 #
 # Stop the kiosk so we can write status to tty1. Cog is restarted on script
 # exit by the trap above. fbcon=rotate:3 (set in cmdline.txt by
 # install-pi.sh) means tty1 renders rotated to match the panel orientation.
 #
-# We tee all output to both /dev/tty1 (live screen) and $LOG_FILE
-# (persists across the cog restart that hides tty1 after we exit). fail()
-# reads from $LOG_FILE so the failure detail in update.status carries the
-# actual error text rather than just a phase name.
+# stdout/stderr go directly to /dev/tty1 so the screen shows live progress.
+# publish_status separately appends to $LOG_FILE so post-mortem inspection
+# survives the cog restart that hides tty1 after we exit. Subprocess
+# output (pip etc.) is teed via run_logged() below for the same reason —
+# we earlier tried `exec > >(tee ...)` for one-stop-shop dual output but
+# the process substitution caused silent SIGPIPE termination.
 
 sudo systemctl stop cog.service 2>/dev/null || true
 sudo chvt 1 2>/dev/null || true
-: > "$LOG_FILE"
-exec > >(tee -a "$LOG_FILE" > /dev/tty1) 2>&1
+exec > /dev/tty1 2>&1
 sudo setfont ter-132n 2>/dev/null || true
 
-# Initialize a fresh status file for this run
+# Initialize fresh log + status files for this run
+: > "$LOG_FILE"
 : > "$STATUS_FILE"
+
+# Run a command, copy its stdout+stderr to both the screen (our stdout)
+# and $LOG_FILE. Returns the command's exit code. Use this around any
+# subprocess whose output we want captured (pip, tar, etc.).
+run_logged() {
+    "$@" 2>&1 | tee -a "$LOG_FILE"
+    return "${PIPESTATUS[0]}"
+}
 
 publish_status "starting" "$TARGET_VERSION"
 
@@ -197,24 +211,24 @@ rm -rf "$STAGING"
 mkdir -p "$STAGING"
 
 publish_status "downloading_manifest"
-lib_download_manifest || fail "manifest download failed"
+run_logged lib_download_manifest || fail "manifest download failed"
 
 publish_status "downloading_artifacts"
-lib_download_artifacts || fail "artifact download / sha256 verification failed"
+run_logged lib_download_artifacts || fail "artifact download / sha256 verification failed"
 
 # ===== install =====
 
 publish_status "extracting"
-lib_extract_artifacts || fail "extract failed"
+run_logged lib_extract_artifacts || fail "extract failed"
 
 publish_status "creating_venv"
-lib_create_venv || fail "venv create / pip install failed"
+run_logged lib_create_venv || fail "venv create / pip install failed"
 
 publish_status "swapping_symlink"
-lib_swap_symlink || fail "symlink swap failed"
+run_logged lib_swap_symlink || fail "symlink swap failed"
 
 publish_status "rendering_units"
-lib_render_units || fail "systemd unit render failed"
+run_logged lib_render_units || fail "systemd unit render failed"
 
 lib_update_installed_json
 
@@ -272,9 +286,26 @@ else
     # Continue to cleanup — don't fail outright.
 fi
 
-# Brief pause for the C6 to come back online and republish state/version.
-publish_status "waiting_for_c6"
-sleep 10
+# Wait for the C6 to come back online and republish state/version with
+# the new version. Until this fires, the C6 is in PENDING_VERIFY state
+# and will revert to the previous firmware on any reboot — so verifying
+# is what tells us the OTA actually stuck. Without this, panel-update.sh
+# could declare success while the C6 was about to roll back.
+#
+# Times out at 90s — covers boot + Thread attach + DNS + TLS + MQTT auth
+# with comfortable headroom. Bumps higher than the underlying mark-valid
+# trigger because verify-c6-version.py only sees the version after the
+# C6 publishes it via UART (which happens AFTER mark_valid in
+# panel_app_on_connected).
+VERIFY_TIMEOUT_SEC=90
+publish_status "verifying_c6"
+if "$PANEL_ROOT/current/bridge/.venv/bin/python" \
+    "$PANEL_ROOT/current/deploy/verify-c6-version.py" \
+    "$VERSION" "$VERIFY_TIMEOUT_SEC"; then
+    publish_status "c6_verified" "$VERSION"
+else
+    fail "C6 didn't report $VERSION within ${VERIFY_TIMEOUT_SEC}s — possible flash failure or rollback"
+fi
 
 # ===== prune + cleanup =====
 
@@ -282,9 +313,19 @@ lib_prune_old_versions "$PREV_TARGET"
 rm -rf "$STAGING"
 
 # ===== bring network back down =====
+#
+# Default behavior matches V2's "Pi is offline in production" goal —
+# disable WiFi after the update. Dev override: PANEL_KEEP_WIFI_ON=1 in
+# the script's env (passed by controls/update.py from the cmd/update
+# payload's keep_wifi_on field). Lets the user iterate without losing
+# SSH after every test update.
 
-publish_status "disabling_wifi"
-sudo nmcli radio wifi off || true
+if [ "${PANEL_KEEP_WIFI_ON:-}" = "1" ]; then
+    publish_status "wifi_off_skipped" "PANEL_KEEP_WIFI_ON=1"
+else
+    publish_status "disabling_wifi"
+    sudo nmcli radio wifi off || true
+fi
 
 publish_status "done" "$VERSION"
 

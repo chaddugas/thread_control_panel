@@ -48,5 +48,12 @@ class StateCache:
         if t == "entity_state":
             eid = msg.get("entity_id")
             return f"entity_state:{eid}" if eid else None
+        if t == "panel_state":
+            # panel_state covers many distinct controls (wifi_ssids,
+            # version, screen_on, etc.) — key by name so they coexist.
+            # Without this, the version envelope gets overwritten by the
+            # next panel_state and verify-c6-version.py can never find it.
+            name = msg.get("name")
+            return f"panel_state:{name}" if name else None
         # Singletons (roster, ha_availability, etc.) key by type alone.
         return t
