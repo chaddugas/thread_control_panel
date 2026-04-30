@@ -628,6 +628,11 @@ void panel_app_on_connected(esp_mqtt_client_handle_t client)
     msg_id = esp_mqtt_client_subscribe(client, PANEL_TOPIC_CMD_WIFI_SCAN, 0);
     ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d",
              PANEL_TOPIC_CMD_WIFI_SCAN, msg_id);
+
+    // HA-driven full update — bridge spawns panel-update.sh on receipt.
+    msg_id = esp_mqtt_client_subscribe(client, PANEL_TOPIC_CMD_UPDATE, 0);
+    ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d",
+             PANEL_TOPIC_CMD_UPDATE, msg_id);
 }
 
 // Buffer size for the wrapped UART line we forward to the Pi. Must be big
@@ -857,6 +862,18 @@ void panel_app_on_data(esp_mqtt_client_handle_t client,
     {
         ESP_LOGI(TAG, "panel_cmd wifi_scan");
         forward_panel_cmd("wifi_scan", (int)strlen("wifi_scan"),
+                          data, data_len);
+        return;
+    }
+
+    // cmd/update: HA wants us to install a new release. Forward the version
+    // payload to the bridge, which spawns panel-update.sh.
+    const size_t update_topic_len = strlen(PANEL_TOPIC_CMD_UPDATE);
+    if ((size_t)topic_len == update_topic_len &&
+        memcmp(topic, PANEL_TOPIC_CMD_UPDATE, update_topic_len) == 0)
+    {
+        ESP_LOGI(TAG, "panel_cmd update (%d byte payload)", data_len);
+        forward_panel_cmd("update", (int)strlen("update"),
                           data, data_len);
         return;
     }

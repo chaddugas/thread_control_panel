@@ -12,6 +12,11 @@ Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/panel/current/deploy/panel-bridge.sh
 Restart=on-failure
 RestartSec=5s
+# KillMode=process so systemd kills only the main bridge pid on stop /
+# restart — leaving any spawned panel-update.sh alive. The update script
+# restarts the bridge mid-flow, and KillMode=control-group (the default)
+# would drag the script down with the bridge.
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target

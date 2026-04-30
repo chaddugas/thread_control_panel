@@ -246,70 +246,106 @@ Bringing it all together. HA orchestrates, bridge executes, GitHub is the source
 
 `cmd/update` rides the existing UART-bridged `set/`/`cmd/` machinery with no new C6 logic beyond a topic-name addition. `state/update_status` is non-retained because it's high-churn ephemeral progress data; the integration tracks the update-in-progress in HA state.
 
-### Pi orchestration (`panel-update.sh`)
+### Pi orchestration (chunk 3a, as built)
 
-Lives at `/opt/panel/current/panel-update.sh` — versioned with releases so a release can ship its own updated installer.
+Lives at `/opt/panel/current/deploy/panel-update.sh`, shipped in the panel-deploy tarball with each release. Sources the new shared `install-lib.sh` for the download/install primitives so install-pi.sh and panel-update.sh share ~80 lines of bash without duplication.
 
-- Bridge subscribes to `cmd/update`, on receipt spawns `panel-update.sh` detached (nohup), exits cleanly. The script lives independently of the bridge process so the bridge can be restarted mid-update without killing the orchestration.
+- Bridge subscribes to `cmd/update` via the existing UART-bridged `set/`/`cmd/` machinery (firmware adds one subscription line + one dispatch branch). On `panel_cmd update`, the new `controls/update.py` handler spawns `panel-update.sh` with `start_new_session=True` so it survives the bridge restart that happens partway through. Combined with `KillMode=process` on `panel-bridge.service`, systemd doesn't drag the script down when the bridge restarts.
+- Status reporting: panel-update.sh appends one JSON line per phase to `/opt/panel/update.status`. New `panel_bridge/update_status.py` background task (started in `__main__`) tails the file and republishes new lines as `state/update_status` panel_state envelopes through the existing pipeline.
 
-Script flow (each step writes to `/dev/tty1` with elapsed timer + checklist; each phase publishes `state/update_status`):
+Script flow (real implementation, simpler than the original sketch — no per-component sha-skip yet, the new version is always installed in full):
 
 ```
- 1. systemctl stop sway                     # kiosk → console
- 2. setfont ter-132n                        # giant font for visibility
+ 0. PID lockfile check (refuse if previous panel-update.sh still alive)
+ 1. systemctl stop cog (kiosk → console)
+ 2. chvt 1 + setfont ter-132n
  3. nmcli radio wifi on
- 4. wait up to 60s for getent hosts api.github.com
- 5. curl release manifest.json + verify shape
- 6. for each component where sha256 differs from installed.json:
-       download artifact → /opt/panel/staging/
-       verify sha256
-       unpack to /opt/panel/versions/<new>/
- 7. ln -sfn versions/<new> /opt/panel/current.new && mv -T /opt/panel/current.new /opt/panel/current
- 8. if firmware.sha256 changed: panel-flash, wait for C6 reconnect + version match
- 9. if ui.sha256 changed:        systemctl restart panel-ui
-10. if bridge.sha256 changed:    systemctl restart panel-bridge
-11. healthcheck: bridge active for 30s, panel-ui responds 200, MQTT connected, C6 version matches target
-12. write installed.json
-13. nmcli radio wifi off
-14. setfont (default)
-15. systemctl start sway                    # back to kiosk
-16. publish state/update_status: done
+ 4. getent hosts api.github.com (up to 60s)
+ 5. lib_resolve_version (latest or arg → tag)
+ 6. lib_download_manifest
+ 7. lib_download_artifacts (sha256 verified)
+ 8. lib_extract_artifacts (into /opt/panel/versions/<v>/)
+ 9. lib_create_venv + pip install bridge in-place
+10. lib_swap_symlink (atomic ln -sfn + mv -T)
+11. lib_render_units (templating User=)
+12. lib_update_installed_json
+13. systemctl restart panel-bridge.service  ← bridge restarts mid-script
+14. systemctl restart panel-ui.service
+15. healthcheck (both services active for 30s)
+16. panel-flash $PANEL_ROOT/current/firmware.bin  (uses NEW bridge's panel-flash)
+17. wait 10s for C6 to reboot + reconnect
+18. lib_prune_old_versions (current + previous-1)
+19. nmcli radio wifi off
+20. trap restarts cog.service on exit (success or failure)
 
-on any failure between steps 7–11:
-  - rollback symlink to previous version
-  - restart services with old version
-  - leave WiFi on for diagnostics
-  - publish state/update_status: failed, detail: <step name>
+on healthcheck failure: roll back symlink to previous version, restart services
+on C6 flash failure: log + continue (Pi is on new version, C6 still on old — valid intermediate)
 ```
 
-### Console update display
+Status events: `starting`, `enabling_wifi`, `waiting_for_dns`, `resolving_version`, `resolved`, `downloading_manifest`, `downloading_artifacts`, `extracting`, `creating_venv`, `swapping_symlink`, `rendering_units`, `restarting_bridge`, `restarting_ui`, `healthcheck`, `flashing_c6`, `c6_flashed` / `c6_flash_failed`, `waiting_for_c6`, `disabling_wifi`, `done`. On failure: `failed` with detail. On healthcheck rollback: `rolling_back` then `failed`.
 
-Add to `install-pi.sh` (one-time setup):
+### Console update display (chunk 3a, as built)
 
-- Append `fbcon=rotate:3` to `/boot/firmware/cmdline.txt` — rotates the kernel framebuffer console independently of the KMS display driver. (V1 lessons confirm `video=...rotate=N` does NOT work on Bookworm's vc4-kms-v3d; `fbcon=rotate=N` is a different mechanism that does.)
-- `apt install console-setup` — pulls in Terminus fonts including `ter-132n` (~32px tall, double-wide, ideal for the small physical display when rotated).
+Added to `install-pi.sh`'s bootstrap-only setup phase, idempotent:
 
-`panel-update.sh` uses `setfont ter-132n` at the start and restores default at the end — giant font only during updates, normal at all other times.
+- Append `fbcon=rotate:3` to `/boot/firmware/cmdline.txt` if not already present — rotates the kernel framebuffer console independently of the KMS display driver. (V1 lessons confirm `video=...rotate=N` does NOT work on Bookworm's vc4-kms-v3d; `fbcon=rotate:N` is a different mechanism that does.)
+- `apt install console-setup` if not already installed — pulls in Terminus fonts including `ter-132n` (~32px tall, double-wide, legible on the small panel from across the room).
+- Writes `/etc/sudoers.d/panel-bridge` with the entries panel-update.sh needs (nmcli, systemctl restart of specific units, chvt, setfont, plus the existing V1 entries for shutdown / wifi).
 
-Output format on the panel during an update:
+`panel-update.sh` uses `sudo setfont ter-132n` at the start. The font reverts on the next sway start (cog regains the framebuffer).
+
+Console output format (chunk 3a — kept simple, no spinner / timer for now):
 
 ```
-Panel Update: v1.4.0 → v2.0.0
-─────────────────────────────
-✓ Enabling WiFi              (2s)
-✓ Waiting for DNS            (4s)
-✓ Downloading v2.0.0         (8s)
-✓ Verifying checksums        (1s)
-⠋ Flashing C6 firmware...    (12s)
+[starting] v2.0.0-beta.4
+[enabling_wifi]
+[waiting_for_dns]
+[resolving_version] v2.0.0-beta.4
+[resolved] v2.0.0-beta.4
+[downloading_manifest]
+[downloading_artifacts]
+[extracting]
+[creating_venv]
+[swapping_symlink]
+[rendering_units]
+[restarting_bridge]
+[restarting_ui]
+[healthcheck]
+[flashing_c6]
+[c6_flashed]
+[waiting_for_c6]
+[disabling_wifi]
+[done] v2.0.0-beta.4
 ```
 
-Spinner + timer redraws current line via `\r` + `\033[K`. Completed steps get a checkmark and elapsed time, leaving a running history visible. After failure, the failed step gets `✗` and the script writes a longer error block below.
+Phases scroll bottom-up at the giant Terminus font size — readable across the room. Future polish: spinner + timer + completed-step checklist overlay (defer to V2 polish if/when needed).
 
-### Validation
+### Repo identity (chunk 3a)
 
-- From HA, click Install on `update.panel_firmware`, watch the panel screen show the sequence.
-- Verify WiFi turns off after success.
-- Force a failure (e.g., point at an artifact with wrong sha256), verify rollback happens, WiFi stays on, HA shows failure.
+Avoids hardcoded `chaddugas/thread_control_panel` strings in source. cut-release substitutes `__REPO__` placeholder at release-build time using `git remote get-url origin`. Touched at substitution time:
+
+- `platform/deploy/install-pi.sh` — loose top-level artifact
+- `platform/deploy/panel-update.sh` — in deploy tarball
+- (Phase 3b will add `platform/integration/thread_panel/update.py`)
+
+For local testing without cut-release, both scripts honor `REPO=foo/bar` env var override.
+
+### Pi-side validation (chunk 3a, manual via mosquitto_pub)
+
+```
+mosquitto_pub -h <broker> -t 'thread_panel/feeding_control/cmd/update' \
+  -m '{"version":"v2.0.0-beta.4"}'
+```
+
+Watch the panel screen flip to console + scroll status; subscribe to `state/update_status` to see HA-side events:
+
+```
+mosquitto_sub -h <broker> -t 'thread_panel/feeding_control/state/update_status' -v
+```
+
+### HA-side validation (chunk 3b)
+
+Defer until the integration's update.py is built.
 
 ---
 

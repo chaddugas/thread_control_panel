@@ -22,7 +22,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from . import reboot, screen, wifi, wifi_manage
+from . import reboot, screen, update, wifi, wifi_manage
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ CMD_HANDLERS: dict[str, ApplyFn] = {
     "reboot_pi": reboot.apply_reboot_pi,
     "wifi_connect": wifi_manage.apply_wifi_connect,
     "wifi_scan": wifi_manage.apply_wifi_scan,
+    "update": update.apply_update,
 }
 
 # Modules that need a one-shot kick at startup but don't fit the

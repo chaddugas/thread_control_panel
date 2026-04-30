@@ -9,7 +9,7 @@ import asyncio
 import logging
 from typing import Any
 
-from . import controls, ota
+from . import controls, ota, update_status
 from .config import LOG_LEVEL, UART_BAUD, UART_PORT, WS_HOST, WS_PORT
 from .state import StateCache
 from .uart_link import UartLink
@@ -121,6 +121,7 @@ async def main() -> None:
         uart.run(),
         ws.run(),
         emit_initial_after_delay(),
+        update_status.run(bridge),
     )
 
 

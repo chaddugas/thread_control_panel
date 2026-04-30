@@ -157,6 +157,27 @@ print(json.load(open('${firmware_dir}/build/project_description.json'))['project
 " 2>/dev/null
 }
 
+# Extract <org>/<repo> from origin remote — used to substitute __REPO__ in
+# scripts + Python sources at release build time, so source files stay clean
+# of hardcoded values. Handles both git@github.com:org/repo.git and
+# https://github.com/org/repo.git forms.
+_cr_gh_repo() {
+  local repo_root=$1
+  local origin
+  origin=$(git -C "$repo_root" remote get-url origin 2>/dev/null || print "")
+  if [[ "$origin" =~ 'github\.com[:/]([^/]+/[^/.]+)' ]]; then
+    print -- "${match[1]}"
+  fi
+}
+
+# In-place substitute __REPO__ → $2 in every file matched by glob $1.
+# Uses sed with a backup suffix for portability between BSD (macOS) and
+# GNU sed; deletes the backup after.
+_cr_substitute_repo() {
+  local file="$1" repo="$2"
+  sed "s|__REPO__|${repo}|g" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+}
+
 # Compute size + sha256 of a file. Outputs JSON object {size, sha256}.
 _cr_file_meta() {
   local file=$1
@@ -384,18 +405,36 @@ PY
     --exclude='.venv' \
     panel_bridge pyproject.toml README.md test_client.py || return 1
 
-  # Deploy tarball — systemd units + runner scripts + sway config. Extracted
-  # to /opt/panel/versions/<v>/deploy/ on the Pi; install-pi.sh renders units
-  # from there. install-pi.sh itself is shipped loose at the release root
-  # (chicken-and-egg: it has to be downloadable before any version exists),
-  # so it's excluded here.
+  # Resolve org/repo from origin once — substituted into install-pi.sh,
+  # panel-update.sh, and any other scripts that reference __REPO__.
+  local gh_repo
+  gh_repo=$(_cr_gh_repo "$repo_root")
+  if [[ -z "$gh_repo" ]]; then
+    print -u2 "cut-release: couldn't parse github org/repo from origin remote"
+    return 1
+  fi
+
+  # Deploy tarball — systemd units + runner scripts + sway config. Staged
+  # to a temp tree first so we can substitute __REPO__ in scripts before
+  # tarballing, leaving the source tree clean. install-pi.sh ships loose
+  # at the release root, not in this tarball (chicken-and-egg: must be
+  # downloadable before any /opt/panel/ exists).
   print ""
   print "→ panel-deploy..."
+  local deploy_stage="$staging/.deploy-stage"
+  rm -rf "$deploy_stage"
+  mkdir -p "$deploy_stage"
+  ( cd "$repo_root/platform/deploy" && \
+    tar -cf - --exclude='install-pi.sh' --exclude='README.md' . ) \
+    | tar -xf - -C "$deploy_stage" || return 1
+  local f
+  for f in "$deploy_stage"/*.sh; do
+    [[ -f "$f" ]] || continue
+    _cr_substitute_repo "$f" "$gh_repo" || return 1
+  done
   tar -czf "$staging/panel-deploy-${bare_version}.tar.gz" \
-    -C "$repo_root/platform/deploy" \
-    --exclude='install-pi.sh' \
-    --exclude='README.md' \
-    . || return 1
+    -C "$deploy_stage" . || return 1
+  rm -rf "$deploy_stage"
 
   # Integration zip — content_in_root: false in hacs.json, so the zip
   # contains a thread_panel/ directory at root.
@@ -406,10 +445,12 @@ PY
       -x '*/__pycache__/*' '*.pyc' ) || return 1
 
   # install-pi.sh shipped loose at the release root for `curl -L
-  # .../releases/latest/download/install-pi.sh | bash` bootstrap.
+  # .../releases/latest/download/install-pi.sh | bash` bootstrap. Same
+  # __REPO__ substitution as the deploy tarball's scripts.
   print ""
   print "→ install-pi.sh..."
   cp "$repo_root/platform/deploy/install-pi.sh" "$staging/install-pi.sh" || return 1
+  _cr_substitute_repo "$staging/install-pi.sh" "$gh_repo" || return 1
   chmod +x "$staging/install-pi.sh"
 
   # ----- manifest.json -----

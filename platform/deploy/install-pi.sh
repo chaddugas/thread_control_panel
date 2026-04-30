@@ -1,37 +1,25 @@
 #!/bin/bash
 #
-# Pi-side installer for thread_control_panel.
-#
-# Downloads + installs a release version into /opt/panel/. Idempotent:
-# safe to re-run for the same version; running with a new version installs
-# it side-by-side, atomically swaps the `current` symlink, and prunes the
-# previous-previous version (keeps current + previous-1 for rollback).
+# Pi-side first-install / manual-recovery installer.
 #
 # Usage:
-#   curl -sSL https://github.com/chaddugas/thread_control_panel/releases/latest/download/install-pi.sh | bash
-#   curl -sSL https://github.com/chaddugas/thread_control_panel/releases/download/v2.0.0-beta.1/install-pi.sh | bash
-#   ./install-pi.sh                     # install latest stable release
-#   ./install-pi.sh v2.0.0-beta.1       # install specific version
+#   curl -sSL https://github.com/__REPO__/releases/latest/download/install-pi.sh | bash
+#   curl -sSL https://github.com/__REPO__/releases/download/v2.0.0-beta.4/install-pi.sh | bash -s -- v2.0.0-beta.4
+#   ./install-pi.sh                     # latest stable release
+#   ./install-pi.sh v2.0.0-beta.4       # specific version
 #
-# Layout produced:
-#   /opt/panel/
-#   ├── current → versions/<v>/         # atomic symlink
-#   ├── versions/<v>/
-#   │   ├── bridge/         # panel-bridge-<v>.tar.gz extracted; .venv created in-place
-#   │   ├── ui-dist/        # feeding_control-ui-<v>.tar.gz extracted
-#   │   ├── deploy/         # panel-deploy-<v>.tar.gz extracted (units, scripts, sway config)
-#   │   ├── firmware.bin    # feeding_control-firmware-<v>.bin
-#   │   └── manifest.json   # release manifest snapshot
-#   └── installed.json      # mirror of current/manifest.json (top-level convenience copy)
+# For ongoing updates after a panel is bootstrapped, use HA's
+# update.panel_firmware entity which triggers panel-update.sh internally.
+# install-pi.sh is for first-install or manual recovery — anything that
+# needs to run before /opt/panel/ + the bridge exist.
 #
-# Run as your normal user (NOT as root). sudo is invoked where actually needed.
-# Assumes apt-installed prereqs are already present (sway, cog, python3-venv) —
-# Step 18 of the V2 build plan will fold first-time apt setup into this script;
-# until then, install those manually for fresh Pis.
+# __REPO__ is substituted by cut-release with the github org/repo (parsed
+# from `git remote get-url origin`). When editing this file in source, you
+# can run with REPO=foo/bar overriding to test locally.
 
 set -euo pipefail
 
-REPO="chaddugas/thread_control_panel"
+REPO="${REPO:-__REPO__}"
 PANEL_ROOT="/opt/panel"
 INSTALL_USER="$USER"
 TARGET_VERSION="${1:-latest}"
@@ -50,7 +38,7 @@ for tool in curl python3 tar shasum sudo; do
     fi
 done
 
-# ===== resolve version =====
+# ===== resolve version (inline — no lib yet) =====
 
 if [ "$TARGET_VERSION" = "latest" ]; then
     echo "→ Resolving latest release..."
@@ -58,7 +46,7 @@ if [ "$TARGET_VERSION" = "latest" ]; then
         | python3 -c "import json,sys; print(json.load(sys.stdin).get('tag_name',''))")
     if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
         echo "install-pi.sh: couldn't resolve latest release for $REPO" >&2
-        echo "  (no published releases yet? check https://github.com/$REPO/releases)" >&2
+        echo "  (no published releases yet? https://github.com/$REPO/releases)" >&2
         exit 1
     fi
 else
@@ -69,13 +57,8 @@ echo "→ Installing $VERSION"
 
 VERSION_DIR="$PANEL_ROOT/versions/$VERSION"
 STAGING="/tmp/panel-install-$VERSION"
-
-# Capture the previous symlink target before we touch anything (used later
-# for the keep-current-plus-previous prune step).
 PREV_TARGET=""
-if [ -L "$PANEL_ROOT/current" ]; then
-    PREV_TARGET=$(readlink "$PANEL_ROOT/current")
-fi
+[ -L "$PANEL_ROOT/current" ] && PREV_TARGET=$(readlink "$PANEL_ROOT/current")
 
 # ===== set up /opt/panel/ =====
 
@@ -86,137 +69,56 @@ if [ ! -d "$PANEL_ROOT" ]; then
 fi
 mkdir -p "$PANEL_ROOT/versions"
 
-# ===== download + verify =====
-
 rm -rf "$STAGING"
 mkdir -p "$STAGING"
+
+# ===== bootstrap the helper lib =====
+#
+# We download manifest.json + the deploy tarball first, extract just enough
+# to source install-lib.sh, then use lib functions for everything else.
+# Avoids duplicating ~80 lines between install-pi.sh and panel-update.sh.
 
 echo "→ Downloading manifest.json..."
 curl -fsSL -o "$STAGING/manifest.json" \
     "https://github.com/$REPO/releases/download/$VERSION/manifest.json"
 
-# Emit "filename sha256" pairs for every artifact in the manifest. install-pi.sh
-# downloads + verifies each one. The integration zip is HACS-side (HA box),
-# not Pi-side, so we skip it here.
-ARTIFACTS=$(python3 - "$STAGING/manifest.json" <<'PY'
+echo "→ Bootstrapping helper library..."
+DEPLOY_TAR_NAME=$(python3 - "$STAGING/manifest.json" <<'PY'
 import json, sys
 m = json.load(open(sys.argv[1]))
-out = []
-for name, meta in m.get("components", {}).items():
-    if name == "integration":
-        continue  # HACS-side, not Pi-side
-    out.append(f"{meta['filename']} {meta['sha256']}")
-for panel_id, comps in m.get("panels", {}).items():
-    for cname, meta in comps.items():
-        out.append(f"{meta['filename']} {meta['sha256']}")
-print("\n".join(out))
+print(m["components"]["deploy"]["filename"])
 PY
 )
+curl -fsSL -o "$STAGING/$DEPLOY_TAR_NAME" \
+    "https://github.com/$REPO/releases/download/$VERSION/$DEPLOY_TAR_NAME"
+mkdir -p "$STAGING/deploy-bootstrap"
+tar -xzf "$STAGING/$DEPLOY_TAR_NAME" -C "$STAGING/deploy-bootstrap"
 
-echo "→ Downloading + verifying artifacts..."
-while IFS=' ' read -r filename expected_sha; do
-    [ -n "$filename" ] || continue
-    echo "    $filename"
-    curl -fsSL -o "$STAGING/$filename" \
-        "https://github.com/$REPO/releases/download/$VERSION/$filename"
-    actual_sha=$(shasum -a 256 "$STAGING/$filename" | awk '{print $1}')
-    if [ "$actual_sha" != "$expected_sha" ]; then
-        echo "install-pi.sh: sha256 mismatch on $filename" >&2
-        echo "  expected: $expected_sha" >&2
-        echo "  got:      $actual_sha" >&2
-        exit 1
-    fi
-done <<< "$ARTIFACTS"
+# install-lib expects PANEL_ROOT, REPO, INSTALL_USER, STAGING, VERSION,
+# VERSION_DIR set as globals (all are above). source it now.
+# shellcheck source=install-lib.sh
+source "$STAGING/deploy-bootstrap/install-lib.sh"
 
-# ===== extract into version dir =====
+# ===== install =====
+
+echo "→ Downloading + verifying remaining artifacts..."
+lib_download_artifacts
 
 echo "→ Extracting into $VERSION_DIR..."
-rm -rf "$VERSION_DIR"
-mkdir -p "$VERSION_DIR/bridge" "$VERSION_DIR/ui-dist" "$VERSION_DIR/deploy"
-
-# bridge tarball → bridge/
-bridge_tar=$(find "$STAGING" -maxdepth 1 -name 'panel-bridge-*.tar.gz' | head -n1)
-[ -n "$bridge_tar" ] || { echo "install-pi.sh: bridge tarball missing in staging"; exit 1; }
-tar -xzf "$bridge_tar" -C "$VERSION_DIR/bridge"
-
-# deploy tarball → deploy/
-deploy_tar=$(find "$STAGING" -maxdepth 1 -name 'panel-deploy-*.tar.gz' | head -n1)
-[ -n "$deploy_tar" ] || { echo "install-pi.sh: deploy tarball missing in staging"; exit 1; }
-tar -xzf "$deploy_tar" -C "$VERSION_DIR/deploy"
-
-# UI tarball → ui-dist/. Currently single-panel; if multiple panels are ever
-# built, this Pi only serves one — pick the first matching the panel-id this
-# device claims. For chunk 3 / Phase 1, just take the first/only UI tarball.
-ui_tar=$(find "$STAGING" -maxdepth 1 -name '*-ui-*.tar.gz' | head -n1)
-[ -n "$ui_tar" ] || { echo "install-pi.sh: UI tarball missing in staging"; exit 1; }
-tar -xzf "$ui_tar" -C "$VERSION_DIR/ui-dist"
-
-# Firmware bin (named per-panel, just copy whichever is in staging)
-firmware_bin=$(find "$STAGING" -maxdepth 1 -name '*-firmware-*.bin' | head -n1)
-[ -n "$firmware_bin" ] || { echo "install-pi.sh: firmware bin missing in staging"; exit 1; }
-cp "$firmware_bin" "$VERSION_DIR/firmware.bin"
-
-# Snapshot the manifest into the version dir
-cp "$STAGING/manifest.json" "$VERSION_DIR/manifest.json"
-
-# ===== bridge venv =====
+lib_extract_artifacts
 
 echo "→ Creating venv + installing bridge deps..."
-if ! python3 -m venv --help | grep -q -- '--system-site-packages'; then
-    echo "install-pi.sh: python3-venv module unavailable. Install with: sudo apt install python3-venv" >&2
-    exit 1
-fi
-python3 -m venv "$VERSION_DIR/bridge/.venv"
-"$VERSION_DIR/bridge/.venv/bin/pip" install --quiet --upgrade pip
-"$VERSION_DIR/bridge/.venv/bin/pip" install --quiet -e "$VERSION_DIR/bridge"
-
-# ===== atomic symlink swap =====
+lib_create_venv
 
 echo "→ Swapping current → $VERSION..."
-ln -sfn "$VERSION_DIR" "$PANEL_ROOT/current.new"
-mv -T "$PANEL_ROOT/current.new" "$PANEL_ROOT/current"
-
-# ===== render systemd units =====
+lib_swap_symlink
 
 echo "→ Rendering systemd units into /etc/systemd/system/..."
-# Replace any prior install's unit files (V1 git-clone setup or older V2).
-# Templating: tracked unit files use `User=pi` as a placeholder; we render
-# substituted copies so the on-disk source stays clean.
-UNITS=(panel-bridge.service panel-ui.service cog.service)
-LEGACY_UNITS=(cage.service)
+lib_render_units
 
-for unit in "${LEGACY_UNITS[@]}"; do
-    target="/etc/systemd/system/$unit"
-    if [ -L "$target" ] || [ -f "$target" ]; then
-        echo "    removing legacy $unit"
-        sudo systemctl stop "$unit" 2>/dev/null || true
-        sudo systemctl disable "$unit" 2>/dev/null || true
-        sudo rm -f "$target"
-    fi
-done
+lib_update_installed_json
 
-for unit in "${UNITS[@]}"; do
-    src="$VERSION_DIR/deploy/$unit"
-    target="/etc/systemd/system/$unit"
-    if [ ! -f "$src" ]; then
-        echo "install-pi.sh: unit file missing: $src" >&2
-        exit 1
-    fi
-    # An earlier (V1) install may have symlinked the source file rather than
-    # rendering a copy. Replace any such symlink.
-    if [ -L "$target" ]; then
-        sudo rm "$target"
-    fi
-    sed -e "s|^User=pi$|User=$INSTALL_USER|" "$src" \
-        | sudo tee "$target" > /dev/null
-    sudo chmod 0644 "$target"
-done
-
-# ===== installed.json (top-level snapshot) =====
-
-cp "$STAGING/manifest.json" "$PANEL_ROOT/installed.json"
-
-# ===== idempotent OS-level setup =====
+# ===== bootstrap-only OS setup =====
 
 echo "→ Adding $INSTALL_USER to graphics/input groups..."
 sudo usermod -aG video,input,render "$INSTALL_USER"
@@ -225,38 +127,60 @@ echo "→ Disabling getty on tty1 (so sway/cog can own the framebuffer)..."
 sudo systemctl disable getty@tty1.service 2>/dev/null || true
 sudo systemctl stop getty@tty1.service 2>/dev/null || true
 
+# fbcon=rotate:N rotates the kernel framebuffer console independently of
+# the KMS display driver. Needed for the panel-update.sh status display
+# (which writes to /dev/tty1) to render correctly on the Waveshare's
+# native-portrait panel. Idempotent: skip if already present.
+if ! grep -q "fbcon=rotate" /boot/firmware/cmdline.txt 2>/dev/null; then
+    echo "→ Adding fbcon=rotate:3 to cmdline.txt for rotated console..."
+    sudo sed -i 's/$/ fbcon=rotate:3/' /boot/firmware/cmdline.txt
+fi
+
+# console-setup brings in the Terminus console fonts (ter-132n is the
+# 32px-tall double-wide we use during updates so the small panel is
+# legible from across the room). Idempotent via dpkg.
+if ! dpkg -l console-setup >/dev/null 2>&1; then
+    echo "→ Installing console-setup for Terminus fonts..."
+    sudo apt update
+    sudo apt install -y console-setup
+fi
+
+# Sudoers entries panel-update.sh needs (also covers the existing bridge
+# control modules — see V1 step 12). Written as a single drop-in file so
+# `sudo visudo -c` validates atomically. Idempotent: replaces if exists.
+echo "→ Installing /etc/sudoers.d/panel-bridge..."
+sudo tee /etc/sudoers.d/panel-bridge >/dev/null <<EOF
+$INSTALL_USER ALL=(root) NOPASSWD: /sbin/shutdown -r now
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/nmcli *
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/tee /sys/class/graphics/fb0/blank
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart panel-bridge.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart panel-ui.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart cog.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl stop cog.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl start cog.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl is-active *
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/chvt *
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/setfont *
+EOF
+sudo chmod 0440 /etc/sudoers.d/panel-bridge
+
 # ===== reload + restart =====
 
 echo "→ Reloading systemd..."
 sudo systemctl daemon-reload
 
 echo "→ Enabling units..."
-sudo systemctl enable "${UNITS[@]}"
+sudo systemctl enable panel-bridge.service panel-ui.service cog.service
 
 echo "→ Restarting bridge + UI server..."
 sudo systemctl restart panel-bridge.service panel-ui.service
-# cog.service is restarted on reboot (sway expects to own tty1 from boot,
-# restarting it mid-session leaves the screen in a weird state).
+# cog.service is restarted on reboot (sway expects to own tty1 from boot).
 
-# ===== prune old versions (keep current + previous-1) =====
+# ===== prune old versions =====
 
-NEW_BASENAME=$(basename "$VERSION_DIR")
-PREV_BASENAME=""
-if [ -n "$PREV_TARGET" ]; then
-    PREV_BASENAME=$(basename "$PREV_TARGET")
-fi
+lib_prune_old_versions "$PREV_TARGET"
 
-if [ -d "$PANEL_ROOT/versions" ]; then
-    for v in $(ls -1 "$PANEL_ROOT/versions/" 2>/dev/null); do
-        if [ "$v" = "$NEW_BASENAME" ] || [ "$v" = "$PREV_BASENAME" ]; then
-            continue
-        fi
-        echo "→ Pruning old version $v"
-        rm -rf "$PANEL_ROOT/versions/$v"
-    done
-fi
-
-# ===== cleanup staging =====
+# ===== cleanup =====
 
 rm -rf "$STAGING"
 

@@ -71,3 +71,9 @@
 // avoid receiving our own cmd/call_service publishes back as echoes.
 #define PANEL_TOPIC_CMD_WIFI_CONNECT       "thread_panel/" PANEL_ID "/cmd/wifi_connect"
 #define PANEL_TOPIC_CMD_WIFI_SCAN          "thread_panel/" PANEL_ID "/cmd/wifi_scan"
+
+// HA-driven full-system update. Forwarded to the Pi over UART as a
+// panel_cmd envelope; bridge spawns panel-update.sh which runs the whole
+// download → install → flash-C6 sequence. Payload is a JSON object with
+// a `version` field (e.g. {"version":"v2.0.0-beta.4"}).
+#define PANEL_TOPIC_CMD_UPDATE             "thread_panel/" PANEL_ID "/cmd/update"
