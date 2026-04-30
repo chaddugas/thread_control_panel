@@ -369,6 +369,13 @@ PY
   # alive because the tag references it.
   local main_head
   main_head=$(git -C "$repo_root" rev-parse HEAD)
+  # Pre-clean: a previous cut may have left an empty
+  # custom_components/thread_panel/ in the working tree (git reset --hard
+  # restores tracked file content but doesn't remove now-untracked empty
+  # directories). With the dst dir already present, `cp -R src dst` puts
+  # src INSIDE dst (→ custom_components/thread_panel/thread_panel/), which
+  # breaks the HACS layout. rm -rf first guarantees cp creates dst-as-src.
+  rm -rf "$repo_root/custom_components"
   mkdir -p "$repo_root/custom_components"
   cp -R "$repo_root/platform/integration/thread_panel" \
         "$repo_root/custom_components/thread_panel" || {
