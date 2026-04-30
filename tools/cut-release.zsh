@@ -170,12 +170,20 @@ _cr_gh_repo() {
   fi
 }
 
-# In-place substitute __REPO__ → $2 in every file matched by glob $1.
-# Uses sed with a backup suffix for portability between BSD (macOS) and
-# GNU sed; deletes the backup after.
+# In-place substitute __REPO__ → $2 in $1, preserving the original file
+# mode. Without preserving mode, scripts lose their +x bit (the `>`
+# redirect creates the temp file with default umask) and systemd's
+# ExecStart fails with "Permission denied" / status 203/EXEC.
 _cr_substitute_repo() {
   local file="$1" repo="$2"
-  sed "s|__REPO__|${repo}|g" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+  python3 - "$file" "$repo" <<'PY'
+import os, sys
+path, repo = sys.argv[1], sys.argv[2]
+mode = os.stat(path).st_mode
+data = open(path).read().replace("__REPO__", repo)
+open(path, "w").write(data)
+os.chmod(path, mode)
+PY
 }
 
 # Compute size + sha256 of a file. Outputs JSON object {size, sha256}.
