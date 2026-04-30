@@ -258,7 +258,7 @@ Script flow (real implementation, simpler than the original sketch — no per-co
 ```
  0. PID lockfile check (refuse if previous panel-update.sh still alive)
  1. systemctl stop cog (kiosk → console)
- 2. chvt 1 + setfont ter-132n
+ 2. chvt 1 + setfont Lat15-TerminusBold32x16
  3. nmcli radio wifi on
  4. getent hosts api.github.com (up to 60s)
  5. lib_resolve_version (latest or arg → tag)
@@ -289,10 +289,10 @@ Status events: `starting`, `enabling_wifi`, `waiting_for_dns`, `resolving_versio
 Added to `install-pi.sh`'s bootstrap-only setup phase, idempotent:
 
 - Append `fbcon=rotate:3` to `/boot/firmware/cmdline.txt` if not already present — rotates the kernel framebuffer console independently of the KMS display driver. (V1 lessons confirm `video=...rotate=N` does NOT work on Bookworm's vc4-kms-v3d; `fbcon=rotate:N` is a different mechanism that does.)
-- `apt install console-setup` if not already installed — pulls in Terminus fonts including `ter-132n` (~32px tall, double-wide, legible on the small panel from across the room).
+- `apt install console-setup` if not already installed — pulls in Terminus fonts including `Lat15-TerminusBold32x16` (~32px tall, double-wide, legible on the small panel from across the room).
 - Writes `/etc/sudoers.d/panel-bridge` with the entries panel-update.sh needs (nmcli, systemctl restart of specific units, chvt, setfont, plus the existing V1 entries for shutdown / wifi).
 
-`panel-update.sh` uses `sudo setfont ter-132n` at the start. The font reverts on the next sway start (cog regains the framebuffer).
+`panel-update.sh` uses `sudo setfont Lat15-TerminusBold32x16` at the start. The font reverts on the next sway start (cog regains the framebuffer).
 
 Console output format (chunk 3a — kept simple, no spinner / timer for now):
 
@@ -449,7 +449,7 @@ For the immediate path: cut V2 work as `v2.0.0-beta.1` → iterate as `v2.0.0-be
 4. **Repo-wide vs per-component versions.** Repo-wide. Per-component sha256 in manifest handles "only re-flash if changed."
 5. **HACS publication.** Skipped — project is too hardware-specific to be useful as a default-store integration. HACS-as-custom-repo (user adds the repo URL) stays available.
 6. **Update transport for C6.** UART at 921600 baud during transfer (~15s for ~1.5 MB). Thread-OTA stays in tree as fallback until V2 proven.
-7. **Console display approach.** tty1 takeover with `fbcon=rotate:3` + `setfont ter-132n`, not a web UI overlay. Doesn't depend on the kiosk being healthy (which matters precisely when you're updating to fix it).
+7. **Console display approach.** tty1 takeover with `fbcon=rotate:3` + `setfont Lat15-TerminusBold32x16`, not a web UI overlay. Doesn't depend on the kiosk being healthy (which matters precisely when you're updating to fix it).
 8. **Beta versioning scheme.** Standard semver prereleases (`-beta.N`), npm-style flat bump menu in cut-release, integration toggle for `Include prereleases`.
 
 ## Open questions (to answer during build)

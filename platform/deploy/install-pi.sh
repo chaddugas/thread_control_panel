@@ -136,9 +136,9 @@ if ! grep -q "fbcon=rotate" /boot/firmware/cmdline.txt 2>/dev/null; then
     sudo sed -i 's/$/ fbcon=rotate:3/' /boot/firmware/cmdline.txt
 fi
 
-# console-setup brings in the Terminus console fonts (ter-132n is the
-# 32px-tall double-wide we use during updates so the small panel is
-# legible from across the room). Idempotent via dpkg.
+# console-setup brings in the Terminus console fonts. Debian names them
+# <charset>-Terminus<HxW>; we use Lat15-TerminusBold32x16 (the largest
+# available — 32px tall, 16px wide, bold). Idempotent via dpkg.
 if ! dpkg -l console-setup >/dev/null 2>&1; then
     echo "→ Installing console-setup for Terminus fonts..."
     sudo apt update

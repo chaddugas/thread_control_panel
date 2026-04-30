@@ -133,7 +133,11 @@ fi
 sudo systemctl stop cog.service 2>/dev/null || true
 sudo chvt 1 2>/dev/null || true
 exec > /dev/tty1 2>&1
-sudo setfont ter-132n 2>/dev/null || true
+# Largest Terminus available on Debian Bookworm's console-setup package
+# (32px tall, 16px wide, bold). Upstream Terminus naming is "ter-132b" —
+# Debian renames as <charset>-Terminus<HxW>. Lat15 covers ASCII + western
+# European; if a panel ever needs Cyrillic/Greek/etc, swap charset prefix.
+sudo setfont Lat15-TerminusBold32x16 2>/dev/null || true
 
 # Initialize fresh log + status files for this run
 : > "$LOG_FILE"
