@@ -176,17 +176,38 @@ publish_status "starting" "$TARGET_VERSION"
 publish_status "enabling_wifi"
 sudo nmcli radio wifi on || fail "nmcli radio wifi on returned non-zero"
 
-publish_status "waiting_for_dns"
-DNS_OK=0
+# `nmcli radio wifi on` returns immediately (just flips the radio bit);
+# the actual scan + auth + DHCP can take 30-60s. Wait for NM to report
+# wlan0 as "connected" before checking DNS — the previous code lumped
+# both phases into waiting_for_dns, hiding where the time went.
+publish_status "waiting_for_connection"
+WIFI_CONNECTED=0
 for _ in $(seq 1 30); do
-    if getent hosts api.github.com >/dev/null 2>&1; then
-        DNS_OK=1
+    if nmcli -t -f DEVICE,STATE device status 2>/dev/null \
+        | grep -q '^wlan0:connected$'; then
+        WIFI_CONNECTED=1
         break
     fi
     sleep 2
 done
+if [ "$WIFI_CONNECTED" -eq 0 ]; then
+    fail "wlan0 did not reach connected state within 60s"
+fi
+
+# Once wlan0 is fully connected, DNS should resolve in well under a
+# second; the tighter 10s timeout catches genuine DNS issues quickly
+# without lumping in connection-up time.
+publish_status "waiting_for_dns"
+DNS_OK=0
+for _ in $(seq 1 10); do
+    if getent hosts api.github.com >/dev/null 2>&1; then
+        DNS_OK=1
+        break
+    fi
+    sleep 1
+done
 if [ "$DNS_OK" -eq 0 ]; then
-    fail "DNS for api.github.com unresolvable after 60s"
+    fail "DNS for api.github.com unresolvable within 10s of WiFi connecting"
 fi
 
 # ===== source helper lib =====

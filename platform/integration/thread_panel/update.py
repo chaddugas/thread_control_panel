@@ -76,6 +76,7 @@ GITHUB_TIMEOUT_SEC = 15
 PHASE_PERCENTAGES: dict[str, int] = {
     "starting": 5,
     "enabling_wifi": 10,
+    "waiting_for_connection": 12,
     "waiting_for_dns": 15,
     "resolving_version": 20,
     "resolved": 25,
