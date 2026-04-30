@@ -345,8 +345,67 @@ PY
     git -C "$repo_root" commit -m "Release $new_version"
   fi
 
-  # ----- tag + push -----
+  # gh_repo is needed by both the off-main commit (for __REPO__ substitution
+  # in update.py) and the artifact build phase below. Resolve once.
+  local gh_repo
+  gh_repo=$(_cr_gh_repo "$repo_root")
+  if [[ -z "$gh_repo" ]]; then
+    print -u2 "cut-release: couldn't parse github org/repo from origin remote"
+    return 1
+  fi
+
+  # ----- off-main commit for HACS-compatible tree at the tag -----
+  #
+  # HACS validates the GitHub tree at the release tag. With content_in_root:
+  # false (which we use), it expects custom_components/<domain>/manifest.json
+  # to exist in the tag's tree. Our main branch keeps the integration source
+  # at platform/integration/thread_panel/ for the platform/product split,
+  # which HACS doesn't recognize as a valid layout.
+  #
+  # Resolution: make the tag point at a commit that mirrors
+  # platform/integration/thread_panel/ into custom_components/thread_panel/,
+  # parented on the version-bumped main commit. After tagging, reset main
+  # back so the duplicate doesn't live on main. The off-main commit stays
+  # alive because the tag references it.
+  local main_head
+  main_head=$(git -C "$repo_root" rev-parse HEAD)
+  mkdir -p "$repo_root/custom_components"
+  cp -R "$repo_root/platform/integration/thread_panel" \
+        "$repo_root/custom_components/thread_panel" || {
+    print -u2 "cut-release: failed to copy integration into custom_components/"
+    rm -rf "$repo_root/custom_components"
+    return 1
+  }
+  if grep -q "__REPO__" "$repo_root/custom_components/thread_panel/update.py" 2>/dev/null; then
+    _cr_substitute_repo "$repo_root/custom_components/thread_panel/update.py" "$gh_repo" || {
+      rm -rf "$repo_root/custom_components"
+      return 1
+    }
+  fi
+  git -C "$repo_root" add custom_components/
+  if ! git -C "$repo_root" commit -m "Release $new_version (HACS layout)" --no-verify; then
+    print -u2 "cut-release: failed to create HACS layout commit"
+    git -C "$repo_root" reset --hard "$main_head" >/dev/null 2>&1
+    rm -rf "$repo_root/custom_components"
+    return 1
+  fi
+
+  # Tag the off-main commit (HEAD right now), then reset main back to the
+  # version-bump commit. The tag preserves the off-main commit; main is clean.
   git -C "$repo_root" tag -a "$new_version" -m "Release $new_version"
+  if ! git -C "$repo_root" reset --hard "$main_head" >/dev/null; then
+    # If reset somehow fails, refuse to push. Otherwise the off-main commit
+    # would land on main as a normal `push origin HEAD`, defeating the
+    # whole point of the off-main pattern. User must intervene manually.
+    print -u2 "cut-release: git reset --hard $main_head failed after tag"
+    print -u2 "  main HEAD is currently at the off-main HACS-layout commit;"
+    print -u2 "  manually 'git reset --hard $main_head' before retrying."
+    print -u2 "  Tag $new_version was created locally; delete with 'git tag -d $new_version' if desired."
+    return 1
+  fi
+
+  # Push main + tag. The tag carries the off-main commit transitively
+  # (push transfers any objects the remote needs to satisfy the ref).
   if ! git -C "$repo_root" push origin HEAD "$new_version"; then
     print -u2 "cut-release: push failed — rolling back local tag"
     git -C "$repo_root" tag -d "$new_version" >/dev/null
@@ -413,14 +472,9 @@ PY
     --exclude='.venv' \
     panel_bridge pyproject.toml README.md test_client.py || return 1
 
-  # Resolve org/repo from origin once — substituted into install-pi.sh,
-  # panel-update.sh, and any other scripts that reference __REPO__.
-  local gh_repo
-  gh_repo=$(_cr_gh_repo "$repo_root")
-  if [[ -z "$gh_repo" ]]; then
-    print -u2 "cut-release: couldn't parse github org/repo from origin remote"
-    return 1
-  fi
+  # gh_repo was resolved earlier (before the off-main HACS-layout commit);
+  # reuse it for __REPO__ substitution in install-pi.sh, panel-update.sh,
+  # and other scripts that need the org/repo string.
 
   # Deploy tarball — systemd units + runner scripts + sway config. Staged
   # to a temp tree first so we can substitute __REPO__ in scripts before

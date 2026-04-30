@@ -35,7 +35,7 @@ Phase 3b (HA-side `update.PanelUpdateEntity`) — **(next up)**.
 2. **Trigger updates remotely from HA** via the native `update` entity domain — no SSH, no Mac required at deploy time. Click "Install" in HA, watch progress on the panel screen.
 3. **Pi spends <60s online per update window**; offline by default. The orchestration script enables WiFi, does its work, and disables WiFi at the end (success or failure with a healthcheck pass).
 4. **C6 firmware rides the existing UART link at high baud** (~15s for a full firmware) — supersedes the Thread-OTA path from V1 step 13. The HTTP-OTA-over-Thread machinery stays in the tree as a fallback (~15–20 min, slow but functional) until V2 is proven; it is no longer the primary path.
-5. **Move `custom_components/thread_panel/` into `platform/integration/`** where it architecturally belongs. HACS consumes a release-zip artifact via `hacs.json` `zip_release: true`, so the integration source is no longer constrained to live at the repo root.
+5. **Move `custom_components/thread_panel/` into `platform/integration/`** where it architecturally belongs. HACS still requires `custom_components/<domain>/manifest.json` to exist *in the tag's tree* for validation (the original V2 plan was wrong on this — `zip_release: true` only affects the download path, not tree validation), so `cut-release` synthesizes an off-main release commit that mirrors `platform/integration/thread_panel/` into `custom_components/thread_panel/`, tags that commit, and resets main back. Main stays clean; the tag's tree satisfies HACS. Off-main commit is reachable only via the tag (see "Off-main release commit" under cut-release below).
 6. **Beta-friendly versioning** so iteration on V2 itself can ship as `v2.0.0-beta.N` releases without confusing the stable update channel.
 
 **Backlog (Steps 18–22) — additional V2 goals carried over from V1:**
@@ -109,11 +109,13 @@ Each phase is roughly 1–2 days of work.
     "name": "Thread Panel",
     "zip_release": true,
     "filename": "thread_panel-{version}.zip",
-    "content_in_root": true
+    "content_in_root": false
   }
   ```
 
-  `content_in_root: true` means HACS expects the integration files (manifest.json, __init__.py, ...) at the zip's root, not wrapped in a directory. HACS reads the `domain` from manifest.json and places the files at `custom_components/<domain>/` on the HA box.
+  `content_in_root: false` means HACS validates that the GitHub tree at the release tag contains `custom_components/<domain>/manifest.json`. The zip itself contains the integration files at root (`manifest.json`, `__init__.py`, ...) — HACS extracts the zip directly into `<config>/custom_components/<domain>/`, so the zip layout is independent of `content_in_root`.
+
+  Note: the integration source on `main` lives at `platform/integration/thread_panel/`, not `custom_components/thread_panel/`. The tag's tree satisfies HACS via a synthetic off-main release commit (see "Off-main release commit" below) — main stays clean of the duplicate.
 
 ### `cut-release` extensions
 
@@ -123,13 +125,35 @@ Today: `yarn build` UIs, commit dist/, tag, push. After Phase 1:
 2. `yarn build` for every panel UI (existing).
 3. `idf.py build` for every panel firmware (new).
 4. `tar -czf panel-bridge-X.Y.Z.tar.gz -C platform/bridge .` (new).
-5. `cd platform/integration/thread_panel && zip -r ../../../thread_panel-X.Y.Z.zip .` (new — files at zip root for HACS `content_in_root: true`).
-6. Generate `manifest.json` with version, sha256, size, and filename per component.
-7. `git tag vX.Y.Z && git push --tags`
-8. `gh release create vX.Y.Z [--prerelease] --notes-from-tag <artifacts...>`
-9. **Stop committing built artifacts to git** — UI dist/ and firmware bins are in releases now. Repo gets lean.
+5. **Off-main release commit for HACS layout** (new): `cp -r platform/integration/thread_panel custom_components/thread_panel`, substitute `__REPO__` in `update.py`, `git add custom_components/`, `git commit -m "Release vX.Y.Z (HACS layout)"`. The version-bump commit on main becomes the parent of this commit; main stays clean.
+6. `cd platform/integration/thread_panel && zip -r ../../../thread_panel-X.Y.Z.zip .` (files at zip root — HACS extracts directly to `<config>/custom_components/<domain>/`).
+7. Generate `manifest.json` with version, sha256, size, and filename per component.
+8. `git tag -a vX.Y.Z` at the off-main commit, then `git reset --hard <main-tip>` so main loses the duplicate. `git push origin HEAD vX.Y.Z` carries main + tag (and the off-main commit transitively, via the tag ref).
+9. `gh release create vX.Y.Z [--prerelease] --notes-from-tag <artifacts...>`.
+10. **Stop committing built artifacts to git** — UI dist/ and firmware bins are in releases now. Repo gets lean.
 
 `cut-release` adopts [`gum`](https://github.com/charmbracelet/gum) (`brew install gum`) for arrow-key prompts.
+
+### Off-main release commit
+
+HACS validates the GitHub tree at the release tag, expecting `custom_components/<domain>/manifest.json` (`content_in_root: false`) or `manifest.json` at repo root (`content_in_root: true`). The `HacsManifest` dataclass has no `subfolder`/`path` field — those are the only two layouts HACS supports.
+
+Our `main` keeps the integration at `platform/integration/thread_panel/` for the platform/product split. Reconciling: cut-release creates a release commit *off* main that mirrors the integration into `custom_components/thread_panel/`, tags that commit, then resets main back. The off-main commit has the version-bump commit as its parent and is reachable only via the tag (git's gc respects tag-reachable objects the same as branch-reachable).
+
+```
+main:    A ── B ── C ── D        (tip after version bump)
+                          \
+                           E      ← tag vX.Y.Z (off-main, has custom_components/)
+```
+
+Effects:
+- `git log main` shows A–D, no E.
+- `git checkout main` shows the source of truth (`platform/integration/`, no `custom_components/`).
+- `git checkout vX.Y.Z` shows what was released (detached HEAD at E with both `platform/integration/` and `custom_components/`).
+- HACS's tree-API call at the tag returns E's tree → finds `custom_components/thread_panel/manifest.json` → validates.
+- The zip artifact extracts as before, regardless of where the source lives.
+
+This pattern is well-precedented (maven-release-plugin, sbt-release, etc. do variants). The one care point: cut-release must reset main back even on partial failure — the script handles this with explicit cleanup on the failure paths between commit and reset.
 
 ### Pi install path (Phase 1 form)
 
@@ -158,7 +182,7 @@ curl -L "$(gh release view --json assets -q '.assets[] | select(.name|test("^thr
   && unzip -o /tmp/tp.zip -d /config/custom_components/thread_panel/
 ```
 
-The zip now ships with files at root (no `thread_panel/` wrapper inside) so HACS's `zip_release` + `content_in_root: true` works. Manual unzip therefore needs `-d /config/custom_components/thread_panel/` rather than the old `-d /config/custom_components/`. Restart HA after. Once HACS-as-custom-repo is set up, this becomes "click update in HACS."
+The zip ships with files at its root (no inner `thread_panel/` wrapper), matching what HACS itself extracts into `<config>/custom_components/<domain>/`. The pre-clean (`rm -rf` + `mkdir -p`) ensures stale files from a previous install don't linger. Restart HA after. Once HACS-as-custom-repo is set up, this becomes "click update in HACS."
 
 ### Validation
 
