@@ -39,18 +39,22 @@ Code is in tree (update.py, OptionsFlow with prereleases toggle, post-OTA reboot
 
 2. **HACS state caching across `content_in_root` flips.** When the user tried beta.13 → beta.14 (briefly with `content_in_root: true`) → beta.15 → beta.16, beta.16 install kept failing with `"No manifest.json file found '/manifest.json'"` (leading slash). Root cause: `HacsIntegrationRepository.__init__` sets `self.content.path.remote = "custom_components"` once, and the `if content_in_root: path.remote = ""` branch from beta.14 left the in-memory object's `path.remote` empty. When beta.16 came along with `content_in_root: false`, the conditional `if path.remote == "custom_components"` no longer matched, so `path.remote` stayed `""` → manifest_path = `"/manifest.json"`. **Workaround used:** delete device + integration + custom repo from HACS, restart HA, re-add the custom repo from scratch. Forces fresh `HacsIntegrationRepository` instance with correct initial `path.remote`. After this, beta.16 installed cleanly. Not something we can fix from our side; HACS bug. Worth a note here so it doesn't bite future-you.
 
-3. **Doubled-path bug in cut-release's off-main commit (FIXED in tree, breaks beta.17).** Beta.17's tag tree had `custom_components/thread_panel/thread_panel/manifest.json` (notice `thread_panel` twice). Cause: between beta.16 and beta.17 the `custom_components/thread_panel/` directory was left empty in the working tree (`git reset --hard` undoes tracked file content but doesn't remove now-untracked empty dirs), and `cp -R src dst` where dst already exists puts src INSIDE dst instead of as dst — classic Unix `cp` gotcha. Fix landed: `rm -rf custom_components` before the `mkdir + cp`. Lands in beta.18+.
+3. **Doubled-path bug in cut-release's off-main commit (FIXED in tree, broke beta.17).** Beta.17's tag tree had `custom_components/thread_panel/thread_panel/manifest.json` (notice `thread_panel` twice). Cause: between beta.16 and beta.17 the `custom_components/thread_panel/` directory was left empty in the working tree (`git reset --hard` undoes tracked file content but doesn't remove now-untracked empty dirs), and `cp -R src dst` where dst already exists puts src INSIDE dst instead of as dst — classic Unix `cp` gotcha. Fix landed: `rm -rf custom_components` before the `mkdir + cp`. Lands in beta.19+.
 
-4. **`cut-release` is a sourced zsh function whose definition lives in shell memory after first `source`.** Already noted under Step 18 with three plausible fix options. Bit us in beta.15 (off-main logic landed in file but old in-memory function fired). Workaround: re-source the file in any shell that's about to run cut-release after edits. The "doubled path" bug above wasn't this — beta.17 cut from a freshly-sourced shell, the bug was real.
+4. **HACS doesn't substitute `{version}` in hacs.json's `filename` field (FIXED in tree, broke beta.18).** Beta.18 install failed with HACS reporting `Got status code 404 when trying to download .../thread_panel-{version}.zip` — literal `{version}` in the URL. Verified against HACS source ([utils/url.py](https://github.com/hacs/integration/blob/main/custom_components/hacs/utils/url.py)): `github_release_asset(filename=...)` uses `filename` as a raw string with no template substitution. There is no documented placeholder syntax HACS supports here. Fix landed: filename in hacs.json is now static `thread_panel.zip` (no version suffix); cut-release.zsh produces `thread_panel.zip` instead of `thread_panel-${bare_version}.zip`; the manifest.json artifact-matching condition was updated from `name.startswith("thread_panel-")` to `name == "thread_panel.zip"`. Lands in beta.19+.
 
-5. **Phase 3b validation milestone NOT YET hit.** "User clicks Install in HA's update entity → entity progresses through phases → Pi reboots → entity reports up-to-date" hasn't happened end-to-end. Closest we got: beta.16 installed in HACS, entity exists, `installed_version` populated, but `latest_version` is null so the Install button isn't actionable. Once #1 above resolves, this should fall into place — Phase 3a already validated the OTA mechanics end-to-end with mosquitto_pub, so the only new thing to test for 3b is the HA-entity-driven path.
+5. **`cut-release` is a sourced zsh function whose definition lives in shell memory after first `source`.** Already noted under Step 18 with three plausible fix options. Bit us in beta.15 (off-main logic landed in file but old in-memory function fired). Workaround: re-source the file in any shell that's about to run cut-release after edits.
+
+6. **Phase 3b validation milestone NOT YET hit.** "User clicks Install in HA's update entity → entity progresses through phases → Pi reboots → entity reports up-to-date" hasn't happened end-to-end. Closest we got: beta.16 installed in HACS, entity exists, `installed_version` populated, but `latest_version` is null so the Install button isn't actionable. Once #1 above resolves AND #4's filename fix ships, this should fall into place — Phase 3a already validated the OTA mechanics end-to-end with mosquitto_pub, so the only new thing to test for 3b is the HA-entity-driven path.
 
 **Suggested resume order next session:**
 
-1. Cut beta.18 (with #3 fix in cut-release re-sourced before running). Verify the tag tree has `custom_components/thread_panel/manifest.json` at the right depth (no doubling). HACS install should succeed cleanly.
-2. After beta.18 is installed via HACS, toggle Include Prereleases in the integration's options. With the OptionsFlow fix from #1, the reload should pick up the new option and `latest_version` should populate within seconds.
-3. If `latest_version` populates, click Install. Watch for full Phase 3b end-to-end success (entity progresses, Pi reboots, entity flips to up-to-date).
-4. If `latest_version` still null after beta.18: check HA logs for `"GitHub releases poll"` warnings, and check `/config/.storage/core.config_entries` for the entry's `options.include_prereleases` value. Diagnose from there.
+1. Re-source cut-release in your shell (#5).
+2. Cut beta.19. Verify on the GitHub release page that the integration zip is named `thread_panel.zip` (not `thread_panel-2.0.0-beta.19.zip`). Verify the tag tree has `custom_components/thread_panel/manifest.json` at the right depth (no doubling — #3 fix).
+3. In HACS, click "Re-download" on Thread Panel and pick beta.19. Should succeed cleanly (#4 fix means HACS's URL-construction now resolves).
+4. After beta.19's integration is installed, toggle Include Prereleases in the integration's options. With the OptionsFlow fix from #1, the reload should pick up the new option and `latest_version` should populate within seconds (no HA restart needed).
+5. If `latest_version` populates, click Install. Watch for full Phase 3b end-to-end success.
+6. If `latest_version` still null: check HA logs for `"GitHub releases poll"` warnings, and check `/config/.storage/core.config_entries` for the entry's `options.include_prereleases` value to verify the toggle persisted.
 
 ## Goals
 
@@ -84,7 +88,7 @@ GitHub Release v2.0.0
 ├── feeding_control-firmware-2.0.0.bin
 ├── feeding_control-ui-2.0.0.tar.gz
 ├── panel-bridge-2.0.0.tar.gz
-├── thread_panel-2.0.0.zip          # integration, for HACS-as-custom-repo or manual install
+├── thread_panel.zip                # integration, for HACS-as-custom-repo or manual install (static filename, no version suffix — HACS doesn't substitute placeholders)
 ├── panel-update.sh                  # orchestration script (versioned with releases)
 └── manifest.json                    # versions + sha256 + sizes per component
 
@@ -133,7 +137,7 @@ Each phase is roughly 1–2 days of work.
   {
     "name": "Thread Panel",
     "zip_release": true,
-    "filename": "thread_panel-{version}.zip",
+    "filename": "thread_panel.zip",
     "content_in_root": false
   }
   ```
@@ -151,7 +155,7 @@ Today: `yarn build` UIs, commit dist/, tag, push. After Phase 1:
 3. `idf.py build` for every panel firmware (new).
 4. `tar -czf panel-bridge-X.Y.Z.tar.gz -C platform/bridge .` (new).
 5. **Off-main release commit for HACS layout** (new): `cp -r platform/integration/thread_panel custom_components/thread_panel`, substitute `__REPO__` in `update.py`, `git add custom_components/`, `git commit -m "Release vX.Y.Z (HACS layout)"`. The version-bump commit on main becomes the parent of this commit; main stays clean.
-6. `cd platform/integration/thread_panel && zip -r ../../../thread_panel-X.Y.Z.zip .` (files at zip root — HACS extracts directly to `<config>/custom_components/<domain>/`).
+6. `cd platform/integration/thread_panel && zip -r ../../../thread_panel.zip .` (files at zip root — HACS extracts directly to `<config>/custom_components/<domain>/`. Static filename, no version suffix: HACS reads `filename` from hacs.json as a literal string and doesn't substitute `{version}` or any other placeholder.)
 7. Generate `manifest.json` with version, sha256, size, and filename per component.
 8. `git tag -a vX.Y.Z` at the off-main commit, then `git reset --hard <main-tip>` so main loses the duplicate. `git push origin HEAD vX.Y.Z` carries main + tag (and the off-main commit transitively, via the tag ref).
 9. `gh release create vX.Y.Z [--prerelease] --notes-from-tag <artifacts...>`.

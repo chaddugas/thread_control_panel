@@ -505,15 +505,17 @@ PY
     -C "$deploy_stage" . || return 1
   rm -rf "$deploy_stage"
 
-  # Integration zip — content_in_root: true in hacs.json, so the zip
-  # contains the integration files directly at root (manifest.json,
-  # __init__.py, ...) with no wrapper directory. HACS reads the domain
-  # field from manifest.json and places the files at
-  # custom_components/<domain>/ on the HA box. Staged through a temp
-  # tree so we can substitute __REPO__ in update.py (and any future
-  # repo-aware integration source) before zipping, and so we can zip
-  # from inside the directory to put files at root. Same pattern as
-  # the deploy tarball above.
+  # Integration zip — files go directly at zip root (no wrapper dir);
+  # HACS extracts into /config/custom_components/<domain>/ on the HA box.
+  # Filename is static (`thread_panel.zip`, no version suffix) because
+  # HACS doesn't substitute placeholders like {version} in the
+  # `filename` field of hacs.json — it uses it as a literal filename in
+  # the release-asset URL. Pinning the version into the filename would
+  # cause every install to 404 since hacs.json's filename can't change
+  # per release. Staged through a temp tree so we can substitute
+  # __REPO__ in update.py before zipping, and so we can zip from inside
+  # the directory to put files at root. Same pattern as the deploy
+  # tarball above.
   print ""
   print "→ thread_panel integration..."
   local integ_stage="$staging/.integ-stage"
@@ -529,7 +531,7 @@ PY
     fi
   done
   ( cd "$integ_stage/thread_panel" && \
-    zip -qr "$staging/thread_panel-${bare_version}.zip" . ) || return 1
+    zip -qr "$staging/thread_panel.zip" . ) || return 1
   rm -rf "$integ_stage"
 
   # install-pi.sh shipped loose at the release root for `curl -L
@@ -575,7 +577,7 @@ for f in sorted(sd.iterdir()):
         components["bridge"] = meta(f)
     elif name.startswith("panel-deploy-"):
         components["deploy"] = meta(f)
-    elif name.startswith("thread_panel-"):
+    elif name == "thread_panel.zip":
         components["integration"] = meta(f)
     elif "-firmware-" in name:
         panel_id = name.split("-firmware-")[0]
@@ -609,7 +611,7 @@ PY
     print ""
     print "Manifest in \`manifest.json\` lists sha256 + size per artifact. The"
     print "Pi installer downloads only what's needed; HACS pulls"
-    print "\`thread_panel-${bare_version}.zip\` for the integration."
+    print "\`thread_panel.zip\` for the integration."
   } > "$notes_file"
 
   print ""

@@ -2,6 +2,6 @@
   "name": "Thread Panel",
   "homeassistant": "2024.4.0",
   "zip_release": true,
-  "filename": "thread_panel-{version}.zip",
+  "filename": "thread_panel.zip",
   "content_in_root": false
 }
