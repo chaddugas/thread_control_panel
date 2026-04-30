@@ -102,16 +102,18 @@ Each phase is roughly 1–2 days of work.
 ### Repo moves
 
 - `custom_components/thread_panel/` → `platform/integration/thread_panel/`
-- Add `hacs.json` at the repo root (5-line file, only thing left at root that exists for HACS):
+- Add `hacs.json` at the repo root (only thing left at root that exists for HACS):
 
   ```json
   {
     "name": "Thread Panel",
     "zip_release": true,
     "filename": "thread_panel-{version}.zip",
-    "content_in_root": false
+    "content_in_root": true
   }
   ```
+
+  `content_in_root: true` means HACS expects the integration files (manifest.json, __init__.py, ...) at the zip's root, not wrapped in a directory. HACS reads the `domain` from manifest.json and places the files at `custom_components/<domain>/` on the HA box.
 
 ### `cut-release` extensions
 
@@ -121,7 +123,7 @@ Today: `yarn build` UIs, commit dist/, tag, push. After Phase 1:
 2. `yarn build` for every panel UI (existing).
 3. `idf.py build` for every panel firmware (new).
 4. `tar -czf panel-bridge-X.Y.Z.tar.gz -C platform/bridge .` (new).
-5. `cd platform/integration && zip -r thread_panel-X.Y.Z.zip thread_panel/` (new).
+5. `cd platform/integration/thread_panel && zip -r ../../../thread_panel-X.Y.Z.zip .` (new — files at zip root for HACS `content_in_root: true`).
 6. Generate `manifest.json` with version, sha256, size, and filename per component.
 7. `git tag vX.Y.Z && git push --tags`
 8. `gh release create vX.Y.Z [--prerelease] --notes-from-tag <artifacts...>`
@@ -151,10 +153,12 @@ One-liner, documented in README:
 
 ```bash
 curl -L "$(gh release view --json assets -q '.assets[] | select(.name|test("^thread_panel.*zip$")) | .url')" -o /tmp/tp.zip \
-  && unzip -o /tmp/tp.zip -d /config/custom_components/
+  && rm -rf /config/custom_components/thread_panel \
+  && mkdir -p /config/custom_components/thread_panel \
+  && unzip -o /tmp/tp.zip -d /config/custom_components/thread_panel/
 ```
 
-Restart HA after. Once we set up HACS-as-custom-repo (optional, post-V2), this becomes "click update in HACS."
+The zip now ships with files at root (no `thread_panel/` wrapper inside) so HACS's `zip_release` + `content_in_root: true` works. Manual unzip therefore needs `-d /config/custom_components/thread_panel/` rather than the old `-d /config/custom_components/`. Restart HA after. Once HACS-as-custom-repo is set up, this becomes "click update in HACS."
 
 ### Validation
 

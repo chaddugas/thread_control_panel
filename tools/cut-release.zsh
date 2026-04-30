@@ -444,11 +444,15 @@ PY
     -C "$deploy_stage" . || return 1
   rm -rf "$deploy_stage"
 
-  # Integration zip — content_in_root: false in hacs.json, so the zip
-  # contains a thread_panel/ directory at root. Staged through a temp
+  # Integration zip — content_in_root: true in hacs.json, so the zip
+  # contains the integration files directly at root (manifest.json,
+  # __init__.py, ...) with no wrapper directory. HACS reads the domain
+  # field from manifest.json and places the files at
+  # custom_components/<domain>/ on the HA box. Staged through a temp
   # tree so we can substitute __REPO__ in update.py (and any future
-  # repo-aware integration source) before zipping, leaving the source
-  # tree clean. Same pattern as the deploy tarball above.
+  # repo-aware integration source) before zipping, and so we can zip
+  # from inside the directory to put files at root. Same pattern as
+  # the deploy tarball above.
   print ""
   print "→ thread_panel integration..."
   local integ_stage="$staging/.integ-stage"
@@ -463,8 +467,8 @@ PY
       _cr_substitute_repo "$f" "$gh_repo" || return 1
     fi
   done
-  ( cd "$integ_stage" && \
-    zip -qr "$staging/thread_panel-${bare_version}.zip" thread_panel ) || return 1
+  ( cd "$integ_stage/thread_panel" && \
+    zip -qr "$staging/thread_panel-${bare_version}.zip" . ) || return 1
   rm -rf "$integ_stage"
 
   # install-pi.sh shipped loose at the release root for `curl -L
