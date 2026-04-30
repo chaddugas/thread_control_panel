@@ -7,4 +7,4 @@
 //
 // Format: vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-TAG.N (semver). Stub
 // "v0.0.0-dev" applies until cut-release writes a real release version.
-#define PANEL_VERSION "v2.0.0-beta.19"
+#define PANEL_VERSION "v2.0.0-beta.20"
