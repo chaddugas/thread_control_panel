@@ -129,6 +129,10 @@ class ThreadPanelOptionsFlow(config_entries.OptionsFlow):
                     )
                     errors["base"] = "panel_id_mismatch"
                 else:
+                    # Update entry.data with the new manifest YAML. This
+                    # alone doesn't trigger reload — only entry.options
+                    # changes do, via the update listener registered in
+                    # __init__.async_setup_entry.
                     self.hass.config_entries.async_update_entry(
                         self.config_entry,
                         data={
@@ -137,12 +141,11 @@ class ThreadPanelOptionsFlow(config_entries.OptionsFlow):
                         },
                     )
                     # async_create_entry's `data=` writes to entry.options.
-                    # The reload below re-reads both data + options, so
-                    # the update entity comes back with the new prereleases
-                    # filter and the forwarder with the new manifest.
-                    await self.hass.config_entries.async_reload(
-                        self.config_entry.entry_id
-                    )
+                    # The framework persists options to disk, then fires
+                    # the update listener (registered by __init__), which
+                    # calls async_reload — so by the time the user sees
+                    # the form close, the integration has already restarted
+                    # with both the new manifest YAML and the new options.
                     return self.async_create_entry(
                         title="",
                         data={CONF_INCLUDE_PRERELEASES: include_prereleases},

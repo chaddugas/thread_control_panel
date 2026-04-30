@@ -41,7 +41,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = forwarder
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Reload the entry whenever data or options change. OptionsFlow updates
+    # entry.options (include_prereleases) and entry.data (manifest YAML);
+    # the reload re-runs async_setup_entry so platforms come back with the
+    # new values. Without this, options changes only take effect on next
+    # HA restart.
+    entry.async_on_unload(entry.add_update_listener(_async_reload_on_change))
+
     return True
+
+
+async def _async_reload_on_change(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Called by HA when entry.data or entry.options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
