@@ -149,6 +149,14 @@ lib_render_units() {
             | sudo tee "$target" > /dev/null
         sudo chmod 0644 "$target"
     done
+
+    # Always reload after rewriting unit files. Without this, a subsequent
+    # `systemctl restart` emits "the unit file changed on disk" even though
+    # restart works correctly (the rewritten content is structurally
+    # identical and ExecStart points through the /opt/panel/current
+    # symlink). Reload makes systemd's in-memory config match disk so the
+    # warning goes away.
+    sudo systemctl daemon-reload
 }
 
 # Top-level snapshot of what's currently installed. Useful for debugging

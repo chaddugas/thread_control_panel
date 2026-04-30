@@ -166,10 +166,8 @@ $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/chown $INSTALL_USER /dev/tty1
 EOF
 sudo chmod 0440 /etc/sudoers.d/panel-bridge
 
-# ===== reload + restart =====
-
-echo "→ Reloading systemd..."
-sudo systemctl daemon-reload
+# ===== enable + restart =====
+# (daemon-reload already ran inside lib_render_units after writing the units)
 
 echo "→ Enabling units..."
 sudo systemctl enable panel-bridge.service panel-ui.service cog.service

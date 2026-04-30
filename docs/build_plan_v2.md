@@ -22,7 +22,10 @@ When V2 ships and the V2 patterns become "current production state," migrate the
 
 ## Current Status
 
-Planning complete; implementation not started. Phase 1 is the next action.
+Phase 1 (artifact-based releases + repo restructure) ✅ DONE.
+Phase 2 (C6 UART OTA receiver + panel-flash CLI) ✅ DONE.
+Phase 3a (Pi-side update orchestration: cmd/update → panel-update.sh → C6 reboot) ✅ DONE — validated end-to-end through beta.11 with both originally-blocking bugs fixed.
+Phase 3b (HA-side `update.PanelUpdateEntity`) — **(next up)**.
 
 ## Goals
 
@@ -345,9 +348,12 @@ mosquitto_sub -h <broker> -p 8883 -u mqtt_user -P "$PASS" --cafile <ca> \
   -t 'thread_panel/feeding_control/state/update_status' -v
 ```
 
-### Current status of chunk 3a (as of v2.0.0-beta.10)
+### ~~Chunk 3a~~ ✅ DONE (validated end-to-end through v2.0.0-beta.11)
 
-Both originally-blocking bugs from beta.9 have fixes in tree. The next OTA cut (beta.10) is the first end-to-end validation candidate — it pairs the bug-1 firmware fix that's already running on the C6 with the bug-2 Pi-side fix landing for the first time in beta.10's `panel-update.sh`.
+Full HA-triggered OTA round-trip (cmd/update → script → C6 reboot into new firmware → state/version reports new version → no manual intervention) **verified end-to-end** with the panel screen showing live phase status the entire time. Both originally-blocking bugs from beta.9 are now fixed and validated by real OTAs:
+
+- **beta.10 OTA** validated bug 1 — C6 auto-rebooted into the new firmware ~6s after `panel-flash` completed, no manual `cmd/reboot_c6` needed. (Pi-side script that ran was still beta.9's; bug 2 fix wasn't exercised yet.)
+- **beta.11 OTA** validated bug 2 — Pi-side script was now beta.10 (with chown + `[ -t 1 ]`), and the panel screen showed the giant rotated phase scroll throughout the run.
 
 **What works:**
 
@@ -501,43 +507,63 @@ For the immediate path: cut V2 work as `v2.0.0-beta.1` → iterate as `v2.0.0-be
 
 # Backlog: additional V2 work (promoted from V1)
 
-The items below were collected during V1 build under "V2 / Post-V1 follow-ups" + "Outstanding (V2)" in [build_plan_v1.md](build_plan_v1.md). They're grouped by theme as Steps 18–22 so each can be picked up, scoped, and tracked independently. Most are coarser than Step 17's phased plan — flesh out the detail when you start the step.
+The items below were collected during V1 build under "V2 / Post-V1 follow-ups" + "Outstanding (V2)" in [build_plan_v1.md](build_plan_v1.md). They're organized into Steps 18–22 by **user story** — what someone is trying to do when they care about each step:
 
-Several items have natural relationships with Step 17 (noted inline). A few from the original V1 list have been dropped or rolled into Step 17:
+| Step | Theme | Story |
+|---|---|---|
+| 18 | First-install & developer ergonomics | "I have a fresh Pi (or a fresh Mac dev box); how easy is it to get going?" |
+| 19 | HA integration UX | "I'm using HA and configuring/tuning my panel from there." |
+| 20 | Multi-device / fleet readiness | "I want a second panel (or a different product) without manual copy-paste fragility." |
+| 21 | Single-device robustness | "The one panel I have should keep working under edge cases." |
+| 22 | Hardware affordances | "Things that depend on the panel hardware itself." |
+
+Steps are independent — pick whichever fits the current motivation. Items inside each step often share scaffolding so they're worth scoping together when you start the step.
+
+A few items from the V1 list have been dropped or rolled into Step 17:
 
 - ~~"GitHub Action / artifact-based deploy instead of full repo clone"~~ — promoted to Step 17 Phase 1.
-- ~~"HACS distribution of `thread_panel` integration"~~ — explicit V2 non-goal (project is too hardware-specific to be useful as default-store integration; HACS-as-custom-repo stays available via Step 17's `hacs.json`).
+- ~~"HACS distribution of `thread_panel` integration"~~ — explicit V2 non-goal (project is too hardware-specific for the default store; HACS-as-custom-repo stays available via Step 17's `hacs.json`).
 - ~~"MQTT credentials in sdkconfig (plaintext)"~~ from Outstanding tech debt — consolidated into Step 20's NVS provisioning item; same root issue.
 
-## Step 18 — Setup & deploy improvements
+## Step 18 — First-install & developer ergonomics
 
-- **`install-pi.sh` full bootstrap from a fresh Pi OS Lite.** Today the script assumes the user has already cloned the repo, set up the bridge venv, and apt-installed cog. Fold all of that in so a brand-new Pi can be brought up with one command. While we're there, fold in the steps from earlier V1 build phases that still live as prose in [build_plan_v1.md](build_plan_v1.md): `dtoverlay=disable-bt` for PL011 on GPIO 14/15 (V1 step 4), serial-console disable, NetworkManager bring-up, and any other one-time setup. End state: image SD → boot → ssh in → run script → reboot → kiosk runs. Should be device-agnostic to whatever extent is possible. **Step 17 dependency:** Step 17 already replaces the git-pull install path with artifact pulls; this step extends that script to also handle first-boot system setup.
-- **Kiosk-renderer choice via flag.** `install-pi.sh --cog` (Pi Zero 2 W, 512 MB) vs `install-pi.sh --cage` (Pi 4+, 1 GB+) so the same script works across hardware. Default to cog on detected ≤768 MB, cage on more. Either path apt-installs the right packages and renders the matching systemd unit. **Step 17 dependency:** depends on Step 17's install-pi.sh refactor; layer this on top.
-- **Direnv + shell helper cleanup.** Several issues with the current `.envrc` / source aliases (interactive `panel-bridge`, `idf` activation, etc.) — paths, ordering, environment leaks. Audit and fix in one pass. (User knows the specifics; revisit when we get there.) Independent of Step 17.
+The "I'm setting up a fresh Pi" and "I'm a developer touching the repo" stories. Almost everything here lands in or around `install-pi.sh` and shell tooling.
 
-## Step 19 — Architecture & abstraction
+- **`install-pi.sh` full bootstrap from a fresh Pi OS Lite.** Today the script assumes the user has already cloned the repo, set up the bridge venv, and apt-installed cog. Fold all of that in so a brand-new Pi can be brought up with one command. While we're there, fold in the steps from earlier V1 build phases that still live as prose in [build_plan_v1.md](build_plan_v1.md): `dtoverlay=disable-bt` for PL011 on GPIO 14/15 (V1 step 4), serial-console disable, NetworkManager bring-up, and any other one-time setup. End state: image SD → boot → ssh in → run script → reboot → kiosk runs. Device-agnostic to whatever extent is possible.
+- **Kiosk-renderer choice via flag.** `install-pi.sh --cog` (Pi Zero 2 W, 512 MB) vs `install-pi.sh --cage` (Pi 4+, 1 GB+) so the same script works across hardware. Default to cog on detected ≤768 MB, cage on more. Either path apt-installs the right packages and renders the matching systemd unit. Layers on top of the bootstrap-overhaul item above.
+- **WPE bubblewrap sandbox proper fix.** `cog.service` currently sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` to bypass Debian's misconfigured bubblewrap. The real fix is `setcap -r /usr/bin/bwrap` (let bwrap fall back to unprivileged userns) plus a check in `install-pi.sh` to re-apply after apt updates of `bubblewrap` clobber the caps. Low security priority (sandbox is mostly defense against malicious sites we don't load), but cleaner. Lands inside the bootstrap-overhaul item naturally.
+- **Direnv + shell helper cleanup.** Several issues with the current `.envrc` / source aliases (interactive `panel-bridge`, `idf` activation, etc.) — paths, ordering, environment leaks. Audit and fix in one pass. (User knows the specifics; revisit when we get there.) Mac-side, independent of the install-pi.sh items.
 
-- **HA integration: replace pure-YAML manifest with a real config flow.** Today the integration's manifest lives in `panels/<id>/ha/manifest.yaml` and gets pasted into the config flow as text. Move to an interactive picker — list installed devices, let the user multi-select entities and per-entity attribute allowlists, store as proper `ConfigEntry.options`. YAML stays as a power-user import path but isn't the default. Independent of Step 17 (but coordinate so the new options shape is forward-compatible with whatever `update` entity options Step 17 adds).
-- **Consistent device ↔ Pi ↔ UI/interface association.** Right now the link between a HA Device (per `panel_id` in the integration), a physical Pi (its hostname), and the served UI (hard-coded `panels/feeding_control/ui/dist/`) is implicit and split across three places. Unify under a single concept ("a panel = these three things linked together"). Probably surfaces as a `device/<hostname>.conf` (or per-Pi config in HA) that names: which product UI to serve, which `panel_id` this device claims, and which physical hardware variant (panel size, sensors present). Rolls up the older "device → product binding" item. **Step 17 dependency:** Step 17 puts the UI under `/opt/panel/current/ui-dist/` regardless of product — this association layer determines *which* product's UI gets installed there.
-- **"Unconfigured panel" splash in `platform/ui-core`.** When a panel boots without a product UI configured (`panel-ui.service` serving an empty/missing dist/, or no panel selected), show a friendly splash with setup instructions instead of a directory listing or blank screen. The splash itself ships as part of ui-core so every panel inherits it for free. Couples with the device-association work above.
-- **Repo reorg: tighter platform / product separation.** Likely outcome (subject to refinement): only the UI is genuinely product-specific. The current `panels/<id>/firmware/` is mostly platform code with a ~20-line `panel_app.c` shim — that shim could live in `platform/firmware/` driven by config. Same for `panels/<id>/ha/` (manifest only). End state: `panels/<id>/` contains a UI directory and a manifest file, nothing else. Couples with the device-association work above; tackle together. **Step 17 dependency:** Step 17 already moves the integration into `platform/integration/`; this is the firmware/manifest equivalent of that move.
+## Step 19 — HA integration UX
 
-## Step 20 — Multi-device / fleet
+The "I'm using HA to configure or tune my panel" story. All of these touch the `thread_panel` integration and/or HA-side configuration shape.
 
-- **NVS-provisioned per-device MQTT credentials.** Currently every device built from this tree shares the credentials baked into `sdkconfig`. Fine for one device. Before scaling to a fleet, switch to a provisioning flow that writes per-device credentials to NVS at first boot (USB serial provisioning tool, BLE captive provisioning, or a Mac-side `panel-provision` CLI). Fix in tandem with the device-association work in Step 19 since both touch device identity. (Consolidates the V1 "Outstanding tech debt" item about plaintext sdkconfig credentials — same root issue, single fix.)
+- **Replace YAML-paste manifest with a real config flow.** Today the integration's manifest lives in `panels/<id>/ha/manifest.yaml` and gets pasted into the config flow as text. Move to an interactive picker — list installed devices, let the user multi-select entities and per-entity attribute allowlists, store as proper `ConfigEntry.options`. YAML stays as a power-user import path but isn't the default. Coordinate the new options shape so it's forward-compatible with the `update` entity options that Step 17 added.
+- **"Unconfigured panel" splash in `platform/ui-core`.** When a panel boots without a product UI configured (`panel-ui.service` serving an empty/missing dist/, or no panel selected), show a friendly splash with setup instructions instead of a directory listing or blank screen. The splash itself ships as part of ui-core so every panel inherits it for free. Closes the loop with the config-flow item above: when you haven't set the panel up in HA yet, the splash tells you what to do.
+- **Configurable presence/theme thresholds via HA, not `.env.production`.** Today the splash distance, theme switch points, etc. are baked into the bundle at build time. For tuning on-site without a rebuild, expose them as HA `number` entities the bridge subscribes to and the UI reads from `panel.entity()`. Tune without rebuilding; multi-device benefit is each Pi has its own settings synced through HA.
 
-## Step 21 — Robustness
+## Step 20 — Multi-device / fleet readiness
 
-- **Tests & CI.** No automated tests anywhere right now. Most useful additions, in rough order: (1) bridge unit tests for the state cache + WS broadcast logic (pytest, minimal mocking); (2) integration tests that the HA `_handle_resync` actually republishes everything (HA test framework supports this); (3) UI component tests on the data-shape parsing in `useFeeder` (Vitest); (4) firmware build verification via GitHub Actions (no hardware in CI, just `idf.py build`); (5) end-to-end smoke test that a fresh Mac + Pi + C6 deploy yields a kiosk with data within N seconds. **Step 17 relationship:** Step 17 explicitly defers CI as a V3 question, but the test-writing piece (1–3) is independent and worthwhile in V2.
-- **MQTT message fragmentation handling on the C6.** We currently rely on `buffer.size = 8 KB` being big enough for any single payload. esp-mqtt actually delivers oversized payloads as multiple `MQTT_EVENT_DATA` callbacks with `current_data_offset` / `total_data_len` set; our `forward_*` helpers just look at the first chunk. Real fix: accumulate fragments in `panel_app_on_data` until `data_len + offset == total_data_len`, then forward. Removes the buffer-tuning band-aid and handles arbitrarily large entity snapshots correctly. Independent of Step 17.
-- **C6 UART rx state machine to ignore boot noise.** Companion to the bridge-side leading-`\n` fix. Currently `panel_uart.c::rx_task` accumulates everything between newlines; if Pi boot noise has no newlines, it sits in the buffer until the bridge's first newline-terminated write flushes it. Cleaner: only start accumulating after seeing `{`, drop bytes that don't fit a JSON-line pattern. Removes the bridge-side workaround. Independent of Step 17.
-- **WPE bubblewrap sandbox proper fix.** `cog.service` currently sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` to bypass Debian's misconfigured bubblewrap. The real fix is `setcap -r /usr/bin/bwrap` (let bwrap fall back to unprivileged userns) plus a check in `install-pi.sh` to re-apply after apt updates of `bubblewrap` clobber the caps. Low priority — sandbox is mostly defense against malicious sites we don't load — but cleaner. Coordinate with Step 18's `install-pi.sh` overhaul so the setcap check lands in the same script.
-- **Configurable presence/theme thresholds via HA, not `.env.production`.** Today the splash distance, theme switch points, etc. are baked into the bundle at build time. For tuning on-site without a rebuild, expose them as HA `number` entities the bridge subscribes to and the UI reads from `panel.entity()`. Single-device benefit: tune without rebuilding. Multi-device benefit: each Pi has its own settings synced through HA. Independent of Step 17.
+The "I want a second panel (or a different product), without copy-paste fragility" story. Everything here is gated by needing the project to *actually* support more than one device — none of it is urgent for a single-panel deployment, but they're tightly coupled when you do tackle it. Recommend doing all four together rather than piecemeal.
 
-## Step 22 — Hardware
+- **NVS-provisioned per-device MQTT credentials + per-device Mosquitto ACLs.** Currently every device built from this tree shares the credentials baked into `sdkconfig`. Fine for one device. Before scaling to a fleet, switch to a provisioning flow that writes per-device credentials to NVS at first boot — Mac-side `panel-provision` CLI over USB serial is the simplest fit (also options: BLE captive provisioning, or a pre-built `nvs.bin` flashed alongside the firmware). Pair with per-device users in Mosquitto's password file + ACLs limiting each user to their own `thread_panel/<id>/*` subtree. Net wins: public release artifacts (`firmware.bin`) carry no credentials at all → safe to publish; per-device blast radius if one is compromised; rotate one without touching the others. (Consolidates the V1 "Outstanding tech debt" item about plaintext sdkconfig credentials — same root issue, single fix.)
+- **Consistent device ↔ Pi ↔ UI/interface association.** Right now the link between a HA Device (per `panel_id` in the integration), a physical Pi (its hostname), and the served UI (hard-coded `panels/feeding_control/ui/dist/`) is implicit and split across three places. Unify under a single concept ("a panel = these three things linked together"). Probably surfaces as a `device/<hostname>.conf` (or per-Pi config in HA) that names: which product UI to serve, which `panel_id` this device claims, and which physical hardware variant (panel size, sensors present). Step 17 puts the UI under `/opt/panel/current/ui-dist/` regardless of product — this association layer determines *which* product's UI gets installed there.
+- **Repo reorg: tighter platform / product separation.** Likely outcome (subject to refinement): only the UI is genuinely product-specific. The current `panels/<id>/firmware/` is mostly platform code with a ~20-line `panel_app.c` shim — that shim could live in `platform/firmware/` driven by config. Same for `panels/<id>/ha/` (manifest only). End state: `panels/<id>/` contains a UI directory and a manifest file, nothing else. Couples with the device-association item above; the two should land together. Step 17 already moved the integration into `platform/integration/`; this is the firmware + manifest equivalent of that move.
+
+## Step 21 — Single-device robustness
+
+The "the one panel I have should keep working under edge cases" story. Independent of fleet support; pays off even with a single device.
+
+- **Tests & CI.** No automated tests anywhere right now. Most useful additions, in rough order: (1) bridge unit tests for the state cache + WS broadcast logic (pytest, minimal mocking); (2) integration tests that the HA `_handle_resync` actually republishes everything (HA test framework supports this); (3) UI component tests on the data-shape parsing in `useFeeder` (Vitest); (4) firmware build verification via GitHub Actions (no hardware in CI, just `idf.py build`); (5) end-to-end smoke test that a fresh Mac + Pi + C6 deploy yields a kiosk with data within N seconds. Step 17 explicitly defers CI as a V3 question, but the test-writing piece (1–3) is independent and worthwhile in V2.
+- **MQTT message fragmentation handling on the C6.** We currently rely on `buffer.size = 8 KB` being big enough for any single payload. esp-mqtt actually delivers oversized payloads as multiple `MQTT_EVENT_DATA` callbacks with `current_data_offset` / `total_data_len` set; our `forward_*` helpers just look at the first chunk. Real fix: accumulate fragments in `panel_app_on_data` until `data_len + offset == total_data_len`, then forward. Removes the buffer-tuning band-aid and handles arbitrarily large entity snapshots correctly.
+- **C6 UART rx state machine to ignore boot noise.** Companion to the bridge-side leading-`\n` fix. Currently `panel_uart.c::rx_task` accumulates everything between newlines; if Pi boot noise has no newlines, it sits in the buffer until the bridge's first newline-terminated write flushes it. Cleaner: only start accumulating after seeing `{`, drop bytes that don't fit a JSON-line pattern. Removes the bridge-side workaround.
+
+## Step 22 — Hardware affordances
+
+Things that depend on the panel hardware itself; mostly opportunistic.
 
 - **Brightness control.** Waveshare 6.25" has no software-controllable backlight. If the hardware is swapped or a Wayland gamma overlay turns out to work, revisit and add a `number` entity the cog kiosk reads. Hardware-gated.
-- **Thread mesh resilience monitoring.** V1 step 11's "Thread mesh flapping under load" was fixed by switching the C6 to MTD, but we have no ongoing visibility. Surface OpenThread mesh-error counters as a diagnostic sensor in HA so degradation shows up before it manifests as command latency. Independent of Step 17.
+- **Thread mesh resilience monitoring.** V1 step 11's "Thread mesh flapping under load" was fixed by switching the C6 to MTD, but we have no ongoing visibility. Surface OpenThread mesh-error counters as a diagnostic sensor in HA so degradation shows up before it manifests as command latency.
 
 ---
 
@@ -553,8 +579,18 @@ Several items have natural relationships with Step 17 (noted inline). A few from
 
 ## Lessons Learned
 
-(empty — fill in during build)
+- **`esp_restart()` runs registered shutdown handlers, and a fresh esp-mqtt TLS handshake will block them.** During chunk 3a's OTA path, the success-path `cleanup_and_release()` was calling `panel_net_resume()` → `esp_mqtt_client_start()` right before `esp_restart()`. The shutdown handlers registered by `esp_mqtt_client_start` blocked `esp_restart()` while the brand-new TLS handshake was in flight. Symptom: `esp_ota_set_boot_partition()` succeeded but the chip kept running on the old firmware indefinitely. **Rule for any "we're about to reboot" path:** don't bring services back up; the chip is about to wipe RAM anyway. Skip the resume, send the result envelope, brief delay for UART drain, `esp_restart()`. Failure paths still need `cleanup_and_release` to keep the chip running.
+
+- **Bash with `set -u` (no `set -e`) silently continues past `exec >` redirect failure.** Verified directly: `bash -c 'set -u; exec > /etc/shadow 2>&1; echo after'` exits 0 with `after` going to original stdout. If that original stdout is DEVNULL (as it is for any service spawned by systemd-managed bridge with `stdout=DEVNULL`), every subsequent echo vanishes. **Rule:** any `exec > <file>` in a script that may run unattended needs a `[ -t 1 ]` (or equivalent) check after, with a fallback that surfaces the failure somewhere durable. Otherwise the failure mode is invisible.
+
+- **`/dev/tty1` ownership reverts to `root:tty` mode 600 the moment cog/sway with `PAMName=login` stops.** Adding the install user to the `tty` group does NOT help — mode 600 means group has no permissions either. The fix on a service-spawned (non-tty) script that wants to write to /dev/tty1 is `sudo chown $USER /dev/tty1` between `chvt 1` and the `exec` redirect. Don't get pulled down rabbit holes about screen blanking, framebuffer rotation, or VT disallocation when the symptom is "nothing on screen": test the permissions first.
+
+- **Bridge spawns `/opt/panel/current/deploy/panel-update.sh` at request time, which is the OLD version's script — the symlink swap to the new version happens partway through.** Practical implication: any change to `panel-update.sh` only takes effect on the OTA *after* the one that installs it. To validate a fix to `panel-update.sh`, you need two OTAs: cut N → trigger OTA, then cut N+1 → trigger OTA. The first one installs the fix, the second one runs it. C6-firmware fixes don't have this delay because the C6 is already running the firmware that handles the post-flash reboot.
 
 ## Proven Facts
 
-(empty — fill in during build)
+- **OTA round-trip latency:** beta.9 → beta.10 took ~140s end-to-end on the production Pi/C6: download + extract ~10s, venv + symlink swap ~65s, healthcheck 30s, panel-flash ~22s, C6 reboot + MQTT reconnect + republish ~6s, wifi-off skip + done ~1s. Healthcheck dominates the wait — could be tightened if iteration speed becomes a bottleneck (currently it's a feature: catches a bouncing service before we flash the C6).
+
+- **Broker is not externally reachable.** Verified 2026-04-30: cellular `openssl s_client -connect the-interstitial-space.duckdns.org:8883` and `:1883` both time out on v4. No AAAA record on the duckdns subdomain. HA box has only ULA + link-local v6 (no globally-routable v6 address). MQTT credential leak via `firmware.bin` published in public releases is therefore LAN-blast-radius only — not zero risk, but bounded to anyone already on the LAN. Step 20 (NVS-provisioned per-device creds) remains the right long-term fix; not urgent.
+
+- **`chaddugas` user has wide-open `NOPASSWD:ALL` via `/etc/sudoers.d/010_pi-nopasswd`** (Pi-imager first-boot drop-in). This is what makes `sudo chown $USER /dev/tty1` work on the production Pi without our explicit sudoers entry. The entry we added in `install-pi.sh`'s drop-in is for cleanliness on Pis that don't have the imager's wide-open rule.
