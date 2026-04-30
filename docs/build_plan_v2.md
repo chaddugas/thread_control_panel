@@ -573,6 +573,93 @@ For the immediate path: cut V2 work as `v2.0.0-beta.1` → iterate as `v2.0.0-be
 
 ---
 
+## Step 17b — WiFi state surface and observability
+
+Sibling to Step 17. Promoted out of backlog mid-V2 because (a) the OTA flow's `enabling_wifi → waiting_for_dns` step is one of the slow phases users see and we don't have visibility into where the time goes, and (b) the bridge's WiFi entity surface is unreliable enough that observed state can lie ("connected to main network" while SSH times out, stays "connected" minutes after toggling off, etc.). Tied to Step 17 because OTA correctness depends on WiFi correctness; tied to broader V2 because we need post-mortem-able logs across reboots.
+
+### Motivation (observed 2026-04-30)
+
+Symptoms that drove this step:
+
+- Network entity reported "connected to main network" while SSH timed out — entity claimed connectivity that didn't exist at IP layer.
+- Toggle WiFi switch OFF → entity stayed at "main network" for several minutes before flipping to "Unknown".
+- Toggle WiFi switch ON → 4+ minutes later, switch entity still reported off, scan-for-networks button produced no visible networks.
+- `wifi_error` entity has been at "Unknown" since added — never reported a real value.
+- Network select entity shows last-user-selected network, not currently-connected SSID.
+- OTA's `enabling_wifi → waiting_for_dns` lumps connection-up time (scan + auth + DHCP, ~50-60s) into the DNS-resolution phase, so the user can't tell what's actually slow.
+- Pi journals are tmpfs by default; reboots and power cycles lose all bridge logs from the prior boot, making post-mortem debugging hard.
+
+### Root causes (from code review)
+
+In [wifi.py](../platform/bridge/panel_bridge/controls/wifi.py) and [wifi_manage.py](../platform/bridge/panel_bridge/controls/wifi_manage.py):
+
+1. `_run_nmcli` has no timeout. If `nmcli` itself hangs (which can happen when NM is in a bad state), the periodic loop blocks indefinitely, freezing all WiFi state updates.
+2. `apply_wifi_enabled` (radio toggle) only re-reads radio state after toggle; SSID + scan + error stay stale until the next 30s periodic loop tick.
+3. `_current_ssid` reads `nmcli device wifi list` cached scan list and finds `IN-USE=*`. NM keeps the IN-USE flag set on the last AP even when the connection has effectively dropped at IP layer — so we report "connected" based on a stale cache rather than NM's actual connection state.
+4. State updates are 100% poll-driven on a 30s cadence; no event subscription to NM, no on-demand re-poll on user-visible actions.
+5. No single source of truth for "what's the WiFi doing right now" — UX surfaces (switch / SSID / error) infer state independently from disjoint nmcli reads.
+
+In [panel-update.sh:176-190](../platform/deploy/panel-update.sh#L176-L190):
+
+6. `nmcli radio wifi on` returns instantly (radio bit only); the actual connection sequence (scan + auth + DHCP) happens implicitly inside the `waiting_for_dns` polling loop, hidden from progress reporting.
+
+In Pi system config:
+
+7. `journalctl -b -2` returns nothing because journals live in `/run/log/journal/` (tmpfs, wiped on reboot). Persistent journal storage is one config line away.
+
+### Plan (commit-by-commit)
+
+Each commit is independently revertable. Numbered to match the original 8-item proposal.
+
+**Commit A — Persistent journals + structured-event logger helper.** Foundation for everything that follows. Configures `Storage=persistent` in `journald.conf` via `install-pi.sh` (creates `/var/log/journal/`, sets retention caps, restarts journald). Adds a small helper in `panel_bridge/events.py` (or similar) that wraps `logging.LoggerAdapter` to attach `extra={"event": "<name>", **fields}` so structured events can be queried via `journalctl --output=json`. Defines a starter set of event names: `wifi_state_change`, `wifi_action`, `nmcli_timeout`, `mqtt_reconnect`, `ota_phase`. No behavior change yet — just infrastructure.
+
+**Commit B — `nmcli` timeouts (item 1).** Wrap every `_run_nmcli` invocation with `asyncio.wait_for(..., timeout=10)`. On timeout, log a structured `nmcli_timeout` event with the args and propagate as a non-zero return so callers handle it as a normal nmcli failure. Defensive; explains the "minutes-stuck" symptom and makes the periodic loop unkillable by a hung subprocess.
+
+**Commit C — Live connection state + on-toggle full refresh (items 2 + 3).** Replace `_current_ssid`'s scan-cache read with a query that reads NM's actual connection state (`nmcli -t -f GENERAL.STATE,GENERAL.CONNECTION device show wlan0` or the equivalent D-Bus call). Update `apply_wifi_enabled` to trigger a full state refresh (radio + SSID + scan + error) after the toggle, not just a radio re-read. Direct fix for the "stays connected after toggle off" and "claims connected while not actually" symptoms.
+
+**Commit D — Event-driven updates via `nmcli monitor` + `wifi_state` enum (items 6 + 7).** Spawn `nmcli -t monitor` (or a D-Bus subscription) as a background task. Each line/event triggers a state refresh. Introduce a single `wifi_state` enum topic carrying one of `disabled` / `disconnected` / `connecting` / `connected` / `error`, derived from NM's state at every refresh. Periodic loop becomes a reconcile-only safety net at a longer interval (60s). Prerequisite for D's structural value: simplifies what HA's entities consume.
+
+**Commit E — Split `enabling_wifi → waiting_for_connection → waiting_for_dns` in panel-update.sh (item 4).** New phase `waiting_for_connection` polls `nmcli -t -f STATE general status` until "connected" or 60s timeout. `waiting_for_dns` becomes a tight 15s DNS-only check that runs after connection confirmed. Update `PHASE_PERCENTAGES` in [update.py](../platform/integration/thread_panel/update.py) to give the new phase a slot. Visible progress through the slow part; tighter per-stage timeouts.
+
+**Commit F — Tighten periodic loop to 10s (item 5).** Cheap once event-driven updates carry the load and timeouts protect against hangs. Keeps reconcile fast without overwhelming nmcli.
+
+**Commit G — HA integration entity polish for "Disconnected" surface (item 8).** Update the relevant entity classes in [platform/integration/thread_panel/](../platform/integration/thread_panel/) so that when `wifi_state == disabled` (or `wifi_enabled == False`), the SSID select and error text entities surface "Disconnected" or "Off" rather than "Unknown". Use the new `wifi_state` enum from Commit D as the discriminator. Possibly also remove `wifi_error` if it's still permanently-Unknown after Commit C — defer that decision until we see Commit C's behavior.
+
+### Success criteria
+
+After all commits ship in a beta:
+
+1. WiFi switch entity flips state within ~1s of any nmcli-side change (event-driven).
+2. SSID entity reflects actual connection state, never lying about IP-layer reachability — toggling off updates within 1s.
+3. `wifi_state` enum is queryable in HA and shows the right value at all times.
+4. Entities surface "Disconnected"/"Off" not "Unknown" when WiFi is disabled.
+5. OTA's `waiting_for_connection` phase is visible in HA's progress bar; `waiting_for_dns` resolves in <2s once connection is up.
+6. After a reboot, `journalctl -b -1 -u panel-bridge.service` returns the prior boot's logs.
+7. `journalctl --output=json _COMM=panel-bridge | jq 'select(.event=="wifi_state_change")'` returns a clean stream of structured WiFi events.
+
+### Diagnostic capture commands (use during validation)
+
+```bash
+# Per-phase OTA timestamps from the most recent run
+cat /opt/panel/update.status
+
+# Bridge logs current boot
+journalctl -b -u panel-bridge.service --no-pager
+# ...prior boot (after Commit A makes journals persistent)
+journalctl -b -1 -u panel-bridge.service --no-pager
+
+# NetworkManager events
+journalctl -b -u NetworkManager --no-pager
+
+# Live state (single source of truth from NM)
+nmcli -t -f STATE,CONNECTION,DEVICE general status
+
+# Structured events as JSON
+journalctl _COMM=panel-bridge --output=json --no-pager
+```
+
+---
+
 # Backlog: additional V2 work (promoted from V1)
 
 The items below were collected during V1 build under "V2 / Post-V1 follow-ups" + "Outstanding (V2)" in [build_plan_v1.md](build_plan_v1.md). They're organized into Steps 18–22 by **user story** — what someone is trying to do when they care about each step:
@@ -629,8 +716,6 @@ The "the one panel I have should keep working under edge cases" story. Independe
 - **C6 UART rx state machine to ignore boot noise.** Companion to the bridge-side leading-`\n` fix. Currently `panel_uart.c::rx_task` accumulates everything between newlines; if Pi boot noise has no newlines, it sits in the buffer until the bridge's first newline-terminated write flushes it. Cleaner: only start accumulating after seeing `{`, drop bytes that don't fit a JSON-line pattern. Removes the bridge-side workaround.
 - **Slow post-power-cycle data backfill.** After cold boot the UI takes anywhere from 30s to 5–10min to populate with entity data, with high variance. Manual C6 reboot via MQTT usually clears it but not always (observed 2026-04-30: power cycle → wait → cold-boot reboot via MQTT → still empty UI; Pi reboot via MQTT also no help). We have no instrumentation to tell which phase contributes the variance — could be C6 Thread-attach, MQTT TLS handshake, retained-publish timing, bridge subscribe, or UI WS reconnect path. First step: add timestamped log lines at each landmark (C6: thread-up, mqtt-connected, first-state-published; bridge: ws-up, first-mqtt-msg-received; UI: mount, first-entity-render) and capture a slow boot to see where the time goes. Until that exists, attempts to fix this are guesswork.
 - **Pi clock drift on offline boot → wrong time in UI.** Pi Zero 2 W has no RTC and WiFi is off by default, so after a power-off the system clock comes back to whatever was last persisted, with no NTP to correct. The UI renders `Date()` against this drifted clock — observed 2026-04-30 showing ~7h 1m 45s behind real wall-clock time. The 7h piece is suspicious (matches PDT offset, 2026-04-30 is in PDT) and might be a timezone double-application bug overlaid on a smaller drift; needs disambiguation by checking what `date` reports on the Pi vs what the UI renders. Cleanest fix: have the C6 broadcast time-of-day over MQTT (it has Thread + SNTP and is online when on); UI reads from there instead of `Date()`. Alternatives: brief WiFi-up at Pi boot for one NTP sync (defeats offline-by-default), or add a hardware RTC. C6-broadcast wins on architecture fit.
-- **Panel WiFi error entity stuck at "Unknown".** The `wifi_error` entity surfaced by the integration has been at "Unknown" since it was added — it's never reported a real value. Either the C6 isn't publishing into the topic the entity subscribes to (mismatched name? never wired?), or the entity is mis-binding. If it can't be made useful within a session of investigation, remove it entirely — a permanently-Unknown entity adds clutter and trains the user to ignore actual unknowns elsewhere.
-- **Panel WiFi network dropdown shows last-set network, not currently-connected.** The select entity for WiFi network only updates when the user picks a new network from the dropdown to connect to. When the panel is connected to a network through normal operation (or from a saved profile at boot), the dropdown still shows whatever was last selected — possibly nothing or a stale value. Desired: read the actually-connected SSID (`nmcli -t -f NAME,STATE c show --active` or equivalent) and surface that as the current selection unless the user is mid-flow to change networks.
 - **Ambient light sensor sensitivity bump.** Threshold/gain on the C6's TEMT6000 → MQTT publish path is too coarse; UI brightness/theme transitions feel sluggish to small lighting changes. Investigate at three layers: (a) C6 ADC sample-and-publish cadence (currently publishes only when value changes by N units; lower N), (b) any UI-side hysteresis/debounce on theme switch points, (c) whether the sensor itself is voltage-divider-limited at the bright end. (a) is the simplest first move. Pairs naturally with Step 19's "configurable presence/theme thresholds via HA" item, since the right end-state is HA `number` entities for these knobs rather than firmware constants.
 
 ## Step 22 — Hardware affordances
