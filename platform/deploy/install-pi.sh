@@ -163,22 +163,45 @@ if ! dpkg -l console-setup >/dev/null 2>&1; then
 fi
 
 # Sudoers entries panel-update.sh needs (also covers the existing bridge
-# control modules — see V1 step 12). Written as a single drop-in file so
-# `sudo visudo -c` validates atomically. Idempotent: replaces if exists.
+# control modules — see V1 step 12). Each rule is an exact command +
+# args match (or the tightest wildcard the use case allows) — Phase 1
+# Group C narrowed the previous nmcli/systemctl/chvt/setfont/setterm
+# wildcards. Written as a single drop-in file so `sudo visudo -c`
+# validates atomically. Idempotent: replaces if exists.
 echo "→ Installing /etc/sudoers.d/panel-bridge..."
 sudo tee /etc/sudoers.d/panel-bridge >/dev/null <<EOF
+# Reboot button
 $INSTALL_USER ALL=(root) NOPASSWD: /sbin/shutdown -r now
-$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/nmcli *
+
+# Screen blank/unblank via sysfs (controls/screen.py)
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/tee /sys/class/graphics/fb0/blank
+
+# WiFi radio toggle (controls/wifi.py + panel-update.sh)
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/nmcli radio wifi on
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/nmcli radio wifi off
+
+# WiFi profile management (controls/wifi_manage.py). SSID is the variable
+# trailing arg so * is required; interface anchored to wlan0 in the add path.
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/nmcli connection delete *
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/nmcli connection up *
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/nmcli connection add type wifi ifname wlan0 *
+
+# Service control (panel-update.sh + bridge bootstrap)
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart panel-bridge.service
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart panel-ui.service
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart cog.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart panel-bridge.service panel-ui.service
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl stop cog.service
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl start cog.service
-$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl is-active *
-$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/chvt *
-$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/setfont *
-$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/setterm *
+
+# Service health checks (panel-update.sh healthcheck loop)
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet panel-bridge.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet panel-ui.service
+
+# Console + framebuffer for OTA progress display (panel-update.sh)
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/chvt 1
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/setfont Lat15-TerminusBold32x16
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/setterm --term linux --blank 0 --powerdown 0
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/chown $INSTALL_USER /dev/tty1
 EOF
 sudo chmod 0440 /etc/sudoers.d/panel-bridge
