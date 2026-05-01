@@ -21,17 +21,19 @@
 
 ## Status
 
-V2 development is active. Shipped through v2.0.0-beta.28:
+V2 development is active. Shipped through v2.0.0-beta.29:
 
 - **Step 17 Phase 1**: artifact-based releases + repo restructure ✅
 - **Step 17 Phase 2**: C6 UART OTA receiver + panel-flash CLI ✅
 - **Step 17 Phase 3a**: Pi-side update orchestration ✅
 - **Step 17 Phase 3b**: HA-side `update.PanelUpdateEntity` ✅
 - **Step 17b**: WiFi state surface + observability ✅
+- **Phase 1 Group A**: MQTT credentials out of firmware (NVS-backed) ✅
+- **Phase 1 Group B**: rotate leaked password + scrub historical `firmware.bin` assets ✅
 
-**In flight**: [Phase 1 Group A — Move MQTT credentials out of firmware](#group-a-move-mqtt-credentials-out-of-firmware). Five commits on main covering the C6 NVS-credential path, bridge file-watcher + delivery, install-pi.sh prompt, Kconfig cleanup, and a periodic re-send (so the first Phase-1 OTA succeeds without manual recovery). Beta.29 cut + production OTA validation are the next steps.
+**In flight**: [Phase 1 Group C — Authorization surface tightening](#group-c-authorization-surface-tightening). Narrow `nmcli` / `systemctl` / console wildcards in `/etc/sudoers.d/panel-bridge` to specific subcommands, override Pi-imager's `NOPASSWD: ALL`, default-exclude `wifi_password` from HA's recorder.
 
-**After Group A ships**: [Group B](#group-b-rotate-credentials--scrub-historical-leakage) (rotate the leaked password, scrub historical `firmware.bin` assets), then Groups C and D in Phase 1, followed by [Phase 2 — Polish & cleanup](#phase-2--polish--cleanup) and the themed groups beyond.
+**After Group C ships**: [Group D](#group-d-ota-tamper-resistance-firmware-signing) (ed25519 OTA payload signing), then [Phase 2 — Polish & cleanup](#phase-2--polish--cleanup) and the themed groups beyond.
 
 ## Keeping this current
 
@@ -98,9 +100,9 @@ The MQTT broker password is published in every `firmware.bin` release artifact a
 
 Confirmed scope (no deferred items — every group is committed Phase 1 work).
 
-### Group A: Move MQTT credentials out of firmware
+### Group A: Move MQTT credentials out of firmware ✅ DONE
 
-**Status (2026-05-01)**: All 5 commits on main. Beta.29 release cut + first-OTA validation are the remaining steps.
+**Status (2026-05-01)**: Shipped in v2.0.0-beta.29. Validated end-to-end in production: strings test on local build (no `myvxan` substring), install-pi.sh prompt path, panel-flash C6 firmware delivery, periodic re-send delivered creds within 60s of fresh-NVS C6 boot, NVS persistence across power-cycle (C6 reconnected to MQTT in 5-15s with no bridge involvement), file-watcher rotation path (validates Group B). Validation surfaced 6 tech-debt items, all filed in [Robustness & correctness](#robustness--correctness).
 
 Today the C6 firmware has `CONFIG_MQTT_USERNAME` and `CONFIG_MQTT_PASSWORD` baked in via sdkconfig. Every published `firmware.bin` carries them. `strings firmware.bin | grep -i myvxan` returns the password instantly.
 
@@ -146,12 +148,15 @@ Today the C6 firmware has `CONFIG_MQTT_USERNAME` and `CONFIG_MQTT_PASSWORD` bake
 6. **Power-cycle test**: unplug + replug the panel. On cold boot, C6 reads NVS → has creds → connects MQTT immediately. Confirms NVS persistence across reboots.
 7. **(Optional) In-place rotation smoke test**: `sudo touch /opt/panel/mqtt_creds.json` → bridge file-watcher fires within 5s → C6 receives `panel_set_creds` → no-ops on identical creds. Confirms the rotation path is wired up for Group B.
 
-### Group B: Rotate credentials + scrub historical leakage
+### Group B: Rotate credentials + scrub historical leakage ✅ DONE
 
-- Generate a new MQTT username + password.
-- Update broker config + the production panel's `mqtt_creds.json`. Verify the panel reconnects.
-- Delete (or replace with sanitized binaries) the `firmware.bin` and `panel-bridge-*.tar.gz` assets in all published GitHub releases. Tags can stay — assets are what carry the credentials.
-- Note: the credential rotation is what actually closes the hole. GitHub CDN may keep cached copies briefly; asset deletion is hygiene, not the primary fix.
+**Status (2026-05-01)**: Both halves complete.
+
+- ✅ Rotated MQTT user `mqtt_user` → `feeding-panel` with a new ~32-char password (stored in user's password manager). Pi `mqtt_creds.json` updated; Group A's file-watcher + `panel_set_creds` path delivered the new creds to the C6, which wrote NVS and reconnected with the new user. Old `mqtt_user` removed from broker after fresh-data flow confirmed (proximity values updating in HA in real time).
+- ✅ Scrubbed `feeding_control-firmware-2.0.0-beta.<N>.bin` from every pre-beta.29 release (27 assets across beta.1 through beta.28, skipping beta.27 which never existed). beta.29's firmware.bin retained as the canonical clean build. Tags + other assets (UI tarballs, install-pi.sh, manifest.json, panel-bridge tarballs, thread_panel.zip, panel-deploy tarballs) stayed put.
+- ✅ Audited `panel-bridge-*.tar.gz` for credential content — confirmed clean (only benign references to "passwordless sudo" comments and runtime WiFi-password handling). No deletion needed.
+
+The rotation is what actually closes the hole. Asset deletion is hygiene — GitHub CDN may serve cached copies briefly; anyone who already pulled the old binaries still has them, but the leaked credential is now dead. Per [Proven Facts](#proven-facts), the broker isn't externally reachable anyway, so the original blast radius was bounded to LAN.
 
 ### Group C: Authorization surface tightening
 
@@ -708,7 +713,8 @@ Convention chosen over a two-stage flow (release-type then bump) because it matc
 
 - **`chaddugas` user has wide-open `NOPASSWD:ALL` via `/etc/sudoers.d/010_pi-nopasswd`** (Pi-imager first-boot drop-in). This is what makes `sudo chown $USER /dev/tty1` work on the production Pi without our explicit sudoers entry. The entry we added in `install-pi.sh`'s drop-in is for cleanliness on Pis that don't have the imager's wide-open rule. Phase 1 Group C plans to override this.
 
-- **Git history is clean of MQTT credentials.** `git log -S 'myvxan' --all` returns nothing — sdkconfig has been gitignored from the start. The only credential leak path is the published `firmware.bin` artifacts on GitHub releases.
+- **Git history is clean of MQTT credentials.** `git log -S 'myvxan' --all` returns nothing — sdkconfig has been gitignored from the start. The only credential leak path was the published `firmware.bin` artifacts on GitHub releases (now scrubbed via Group B; rotation also invalidated the leaked password regardless).
+- **Group A's credential delivery + rotation path works end-to-end in production.** Verified 2026-05-01 during Group B: writing new creds to `/opt/panel/mqtt_creds.json` fires the bridge's file-watcher within ~5s, bridge sends `panel_set_creds`, C6 writes NVS + restarts MQTT client, reconnects authenticating as the new user. `mqtt_user` → `feeding-panel` rotation completed without panel downtime visible in HA (entities continued updating throughout). Same path will work for any future rotation.
 
 ## Technical Debt
 
