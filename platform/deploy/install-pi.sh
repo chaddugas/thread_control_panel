@@ -183,6 +183,110 @@ $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/chown $INSTALL_USER /dev/tty1
 EOF
 sudo chmod 0440 /etc/sudoers.d/panel-bridge
 
+# ===== MQTT credentials =====
+#
+# The C6 firmware reads its MQTT username + password from NVS, not from
+# CONFIG_MQTT_USERNAME/CONFIG_MQTT_PASSWORD baked into firmware.bin. The
+# bridge sends the values over UART (panel_set_creds envelope) at startup
+# and on file-change. We collect the values here and write them to
+# /opt/panel/mqtt_creds.json so the bridge can do that.
+#
+# Skipped if the file already exists — install-pi.sh is bootstrap-only,
+# so a re-run shouldn't re-prompt over an existing valid config.
+
+CREDS_FILE="$PANEL_ROOT/mqtt_creds.json"
+
+if [ -f "$CREDS_FILE" ]; then
+    echo "→ MQTT credentials already at $CREDS_FILE — skipping prompt"
+else
+    echo "→ Configuring MQTT credentials..."
+    echo "  These get stored in $CREDS_FILE (mode 0600) and pushed to the C6"
+    echo "  over UART. The C6 keeps them in NVS — no creds in firmware.bin."
+    echo
+
+    # Validation matches what panel_bridge/mqtt_creds.py and
+    # panel_net.c enforce. Substring tests for `"` and `\` are required
+    # because the C6's panel_app.c uses a substring-based JSON parser
+    # that doesn't handle escapes.
+
+    while true; do
+        read -r -p "  MQTT username: " mqtt_user
+        if [ -z "$mqtt_user" ]; then
+            echo "    × username can't be empty"
+            continue
+        fi
+        if [ "${#mqtt_user}" -gt 64 ]; then
+            echo "    × username max length is 64 chars"
+            continue
+        fi
+        case "$mqtt_user" in
+            *'"'* | *'\'*)
+                echo "    × username can't contain \" or \\"
+                continue
+                ;;
+        esac
+        if [[ "$mqtt_user" =~ [^[:print:]] ]]; then
+            echo "    × username contains non-printable characters"
+            continue
+        fi
+        break
+    done
+
+    while true; do
+        read -r -s -p "  MQTT password (12-128 chars, 2 of {letters, digits, symbols}): " mqtt_pass
+        echo
+        if [ "${#mqtt_pass}" -lt 12 ]; then
+            echo "    × password min length is 12"
+            continue
+        fi
+        if [ "${#mqtt_pass}" -gt 128 ]; then
+            echo "    × password max length is 128"
+            continue
+        fi
+        case "$mqtt_pass" in
+            *'"'* | *'\'*)
+                echo "    × password can't contain \" or \\"
+                continue
+                ;;
+        esac
+        if [[ "$mqtt_pass" =~ [^[:print:]] ]]; then
+            echo "    × password contains non-printable characters"
+            continue
+        fi
+        # Class-diversity check: at least 2 of {letter, digit, symbol}
+        classes=0
+        [[ "$mqtt_pass" =~ [A-Za-z] ]] && classes=$((classes + 1))
+        [[ "$mqtt_pass" =~ [0-9] ]] && classes=$((classes + 1))
+        [[ "$mqtt_pass" =~ [^A-Za-z0-9] ]] && classes=$((classes + 1))
+        if [ "$classes" -lt 2 ]; then
+            echo "    × must contain at least 2 of {letters, digits, symbols}"
+            continue
+        fi
+        read -r -s -p "  Confirm password: " mqtt_pass_confirm
+        echo
+        if [ "$mqtt_pass" != "$mqtt_pass_confirm" ]; then
+            echo "    × passwords don't match"
+            continue
+        fi
+        break
+    done
+
+    # Atomic write: temp file + rename. Use python3 so JSON encoding is
+    # bulletproof (the validation above already rules out the cases
+    # that would break the C6 parser, but proper json.dumps is cheap
+    # defense-in-depth). umask + chmod tighten to 0600 BEFORE writing
+    # so the password is never on disk world-readable.
+    tmp_file=$(mktemp "$PANEL_ROOT/mqtt_creds.json.XXXXXX")
+    chmod 0600 "$tmp_file"
+    python3 -c '
+import json, sys
+print(json.dumps({"username": sys.argv[1], "password": sys.argv[2]}))
+' "$mqtt_user" "$mqtt_pass" > "$tmp_file"
+    mv "$tmp_file" "$CREDS_FILE"
+    echo "  ✓ Credentials written to $CREDS_FILE"
+    echo
+fi
+
 # ===== enable + restart =====
 # (daemon-reload already ran inside lib_render_units after writing the units)
 

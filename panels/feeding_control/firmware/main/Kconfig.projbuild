@@ -6,18 +6,17 @@ menu "Thread Panel — feeding_control"
         help
             URI of the MQTT broker. Use mqtts:// for TLS.
 
-    config MQTT_USERNAME
-        string "MQTT username"
-        default ""
-        help
-            Username for MQTT authentication.
-
-    config MQTT_PASSWORD
-        string "MQTT password"
-        default ""
-        help
-            Password for MQTT authentication. This is stored in sdkconfig
-            in plaintext — keep sdkconfig out of version control.
+    # MQTT username + password are NOT Kconfig options. They live in NVS
+    # (namespace "panel_mqtt", keys "user" / "pass") and are populated at
+    # provisioning time by the bridge sending a panel_set_creds UART
+    # envelope. install-pi.sh prompts for the values and writes them to
+    # /opt/panel/mqtt_creds.json on the Pi; the bridge reads that file and
+    # forwards over UART. See platform/firmware/components/panel_platform/
+    # panel_net.c (panel_net_set_credentials) for the C6 side.
+    #
+    # Reason for the indirection: published firmware.bin artifacts must
+    # carry no credentials. Anything in Kconfig becomes a string literal
+    # in the binary, so MQTT auth can't go through this menu.
 
     config MQTT_CLIENT_ID
         string "MQTT client ID"
