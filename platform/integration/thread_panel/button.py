@@ -22,7 +22,10 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import CONF_PANEL_ID, DATA_ENTITIES, DOMAIN, TOPIC_PANEL_CMD
 from .entity import PanelEntityBase
 from .select import ATTR_SECURITY_BY_SSID, REGISTRY_KEY as SELECT_REGISTRY_KEY
-from .text import REGISTRY_KEY as TEXT_REGISTRY_KEY
+from .text import (
+    REGISTRY_KEY as TEXT_REGISTRY_KEY,
+    VALUE_REGISTRY_KEY as TEXT_VALUE_REGISTRY_KEY,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -99,7 +102,6 @@ class PanelWifiConnectButton(PanelEntityBase, ButtonEntity):
             return
 
         select_state = self.hass.states.get(select_id)
-        text_state = self.hass.states.get(text_id)
 
         if select_state is None or select_state.state in (
             None,
@@ -111,9 +113,10 @@ class PanelWifiConnectButton(PanelEntityBase, ButtonEntity):
             return
 
         ssid = select_state.state
-        password = text_state.state if text_state is not None else ""
-        if password in (None, "unknown", "unavailable"):
-            password = ""
+        # Password lives in hass.data (intentionally not in state — see
+        # text.py for the recorder-exclusion rationale). Empty string when
+        # the user hasn't typed anything yet.
+        password = registry.get(TEXT_VALUE_REGISTRY_KEY, "") or ""
 
         security_map = (
             select_state.attributes.get(ATTR_SECURITY_BY_SSID, {}) or {}

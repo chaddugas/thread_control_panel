@@ -160,12 +160,11 @@ The rotation is what actually closes the hole. Asset deletion is hygiene — Git
 
 ### Group C: Authorization surface tightening
 
-- Replace wildcards in `/etc/sudoers.d/panel-bridge` with the specific subcommands actually used:
-  - `/usr/bin/nmcli *` → individual nmcli commands (`radio wifi on|off`, `connection delete`, `connection add`, `connection up`, `device wifi list`, `device status`, `device show wlan0`, `monitor`).
-  - `/usr/bin/systemctl is-active *` → specific services.
-  - `/usr/bin/chvt *`, `/usr/bin/setfont *`, `/usr/bin/setterm *` — audit and tighten where possible.
-- Override Pi-imager's `/etc/sudoers.d/010_pi-nopasswd` (NOPASSWD: ALL, noted under Proven Facts) — remove or override during install-pi.sh hardening so our restrictive entries are the only allowance.
-- Default-exclude `text.thread_panel_*_wifi_password` from HA's recorder — ship a recorder-exclude rule with the integration rather than asking users to opt out via global config.
+**Status (2026-05-01)**: Code complete in working tree across three commits (`6993005` C1, `d469c9c` C2 + same-version OTA fix, plus the C3 commit landing alongside this doc update). Validation pending in beta.30 — re-run install-pi.sh on the Pi to write the narrowed sudoers + remove Pi-imager NOPASSWD, exercise each gated path (reboot button, screen toggle, wifi toggle/scan/connect, OTA flow), and verify the wifi password no longer appears in HA's recorder DB. The same-version OTA bug originally filed in [Robustness & correctness](#robustness--correctness) was fixed as part of this work and gets removed from that list once validated.
+
+- ✅ **C1 — Narrow `/etc/sudoers.d/panel-bridge`**. 13 wildcard rules → 19 narrower rules grouped by purpose. `nmcli *` → 5 specific subcommands (`radio wifi on/off` + `connection delete/up/add type wifi ifname wlan0 *` with the interface anchored). `systemctl is-active *` → 2 specific services. `chvt *`, `setfont *`, `setterm *` → exact-arg matches. `nmcli monitor` and `nmcli device wifi list` dropped from the rule list — both are invoked without sudo in current code.
+- ✅ **C2 — Remove Pi-imager's `/etc/sudoers.d/010_pi-nopasswd`**. install-pi.sh now removes the file at the very end (after all sudo-needing setup is done). Defense in depth: passwordless sudo is now limited to what panel-bridge explicitly grants. Subsequent sudo invocations prompt for password as normal Linux behavior; sudo's ~15min credential cache covers a typical session.
+- ✅ **C3 — Wifi password kept out of recorder**. **Plan changed mid-flight**: the original V2 plan said "ship a recorder-exclude rule with the integration", but HA's recorder filter is built once at startup from `configuration.yaml` and isn't extensible from an integration (verified via HA developer docs + recorder docs + community feature-request threads — no programmatic API exists). Storing-outside-state is the only way to actually keep the value out of the recorder DB. `PanelWifiPasswordText.async_set_value` now stashes the typed value in `hass.data[DOMAIN][DATA_ENTITIES][panel_id][VALUE_REGISTRY_KEY]` and never calls `async_write_ha_state` — state stays empty for the entity's lifetime. `PanelWifiConnectButton` reads from `hass.data` instead of `hass.states.get(text_id).state`. Trade-off: password doesn't survive HA frontend navigation (typed-then-navigate-away clears it), but the typical flow is type-and-immediately-press-Connect, so this matches existing UX.
 
 ### Group D: OTA tamper-resistance (firmware signing)
 
