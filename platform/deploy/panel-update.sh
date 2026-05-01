@@ -98,24 +98,16 @@ fail() {
     exit 1
 }
 
-# ===== early same-version refusal =====
-#
-# If TARGET_VERSION is an explicit tag (not "latest") and matches the
-# version we're already running, refuse BEFORE the console takeover +
-# WiFi enable. Avoids wasted work + a visible kiosk flicker for the
-# common "you clicked Install on the version you're already on" case.
-# The "latest" case still has to wait for lib_resolve_version (needs
-# network) — second refusal fires later if that resolves to current.
-
-if [ "$TARGET_VERSION" != "latest" ] && [ -L "$PANEL_ROOT/current" ]; then
-    EARLY_CURRENT=$(basename "$(readlink "$PANEL_ROOT/current")")
-    if [ "$TARGET_VERSION" = "$EARLY_CURRENT" ]; then
-        # No console takeover yet — just write to status and exit.
-        printf '{"phase":"rejected","detail":"already on %s (no update needed)","ts":%d}\n' \
-            "$TARGET_VERSION" "$(date +%s)" > "$STATUS_FILE"
-        exit 0
-    fi
-fi
+# Note: previously this script had an early same-version refusal here that
+# exited before console takeover when TARGET_VERSION matched the current
+# symlink. That blocked HA-driven OTAs from flashing the C6 when the Pi was
+# already current but the C6 wasn't (caught during Group A validation —
+# install-pi.sh-then-OTA path stranded the C6). Now handled lower down via
+# SKIP_PI_INSTALL: skip the destructive Pi-side phases when version matches,
+# but always run the C6 flash phase since that's the work the user actually
+# wants done. HA's UpdateEntity already disables the Install button when
+# installed_version >= latest_version, so the only way to land here with
+# same version is a deliberate manual MQTT publish.
 
 # ===== console takeover =====
 #
@@ -231,85 +223,92 @@ if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
 fi
 publish_status "resolved" "$VERSION"
 
-# Refuse if the resolved version is what we're already running. Otherwise
-# lib_extract_artifacts would rm -rf the live install dir (since
-# $PANEL_ROOT/current points at $PANEL_ROOT/versions/$VERSION/), wiping
-# the running venv mid-flight. install-pi.sh allows this for explicit
-# user-driven re-installs; HA-driven OTA shouldn't ever do it.
+# If the resolved version is already running, skip the Pi-side install
+# phases — lib_extract_artifacts does `rm -rf "$VERSION_DIR"` and
+# VERSION_DIR == current symlink target in this case, which would wipe the
+# live install mid-flight. But still run the C6 flash phase: the C6 may
+# legitimately be on a different version (Group A scenario:
+# install-pi.sh installs Pi-side ahead of an HA-driven OTA, and only the
+# C6 actually needs flashing). HA's UpdateEntity gates the Install button
+# on installed_version (read from C6's state/version) ≠ latest_version, so
+# arriving here at all means the C6 is most likely behind.
+SKIP_PI_INSTALL=false
 if [ -n "$PREV_TARGET" ]; then
     PREV_VERSION=$(basename "$PREV_TARGET")
     if [ "$VERSION" = "$PREV_VERSION" ]; then
-        publish_status "rejected" "already on $VERSION (no update needed)"
-        exit 0
+        publish_status "pi_already_current" "$VERSION — skipping Pi-side install, will re-flash C6"
+        SKIP_PI_INSTALL=true
     fi
 fi
 
 VERSION_DIR="$PANEL_ROOT/versions/$VERSION"
 STAGING="/tmp/panel-update-$VERSION"
 
-# ===== download =====
+if [ "$SKIP_PI_INSTALL" = false ]; then
+    # ===== download =====
 
-mkdir -p "$PANEL_ROOT/versions"
-rm -rf "$STAGING"
-mkdir -p "$STAGING"
+    mkdir -p "$PANEL_ROOT/versions"
+    rm -rf "$STAGING"
+    mkdir -p "$STAGING"
 
-publish_status "downloading_manifest"
-run_logged lib_download_manifest || fail "manifest download failed"
+    publish_status "downloading_manifest"
+    run_logged lib_download_manifest || fail "manifest download failed"
 
-publish_status "downloading_artifacts"
-run_logged lib_download_artifacts || fail "artifact download / sha256 verification failed"
+    publish_status "downloading_artifacts"
+    run_logged lib_download_artifacts || fail "artifact download / sha256 verification failed"
 
-# ===== install =====
+    # ===== install =====
 
-publish_status "extracting"
-run_logged lib_extract_artifacts || fail "extract failed"
+    publish_status "extracting"
+    run_logged lib_extract_artifacts || fail "extract failed"
 
-publish_status "creating_venv"
-run_logged lib_create_venv || fail "venv create / pip install failed"
+    publish_status "creating_venv"
+    run_logged lib_create_venv || fail "venv create / pip install failed"
 
-publish_status "swapping_symlink"
-run_logged lib_swap_symlink || fail "symlink swap failed"
+    publish_status "swapping_symlink"
+    run_logged lib_swap_symlink || fail "symlink swap failed"
 
-publish_status "rendering_units"
-run_logged lib_render_units || fail "systemd unit render failed"
+    publish_status "rendering_units"
+    run_logged lib_render_units || fail "systemd unit render failed"
 
-lib_update_installed_json
+    lib_update_installed_json
 
-# ===== restart services on new version =====
+    # ===== restart services on new version =====
 
-publish_status "restarting_bridge"
-sudo systemctl restart panel-bridge.service || fail "panel-bridge restart returned non-zero"
+    publish_status "restarting_bridge"
+    sudo systemctl restart panel-bridge.service || fail "panel-bridge restart returned non-zero"
 
-publish_status "restarting_ui"
-sudo systemctl restart panel-ui.service || fail "panel-ui restart returned non-zero"
+    publish_status "restarting_ui"
+    sudo systemctl restart panel-ui.service || fail "panel-ui restart returned non-zero"
 
-# ===== healthcheck =====
-#
-# Both services should stabilize within ~30s. If either bounces, roll back
-# to the previous version.
+    # ===== healthcheck =====
+    #
+    # Both services should stabilize within ~30s. If either bounces, roll back
+    # to the previous version.
 
-publish_status "healthcheck"
-HEALTH_OK=0
-for _ in $(seq 1 30); do
-    if sudo systemctl is-active --quiet panel-bridge.service \
-        && sudo systemctl is-active --quiet panel-ui.service; then
-        HEALTH_OK=1
-        sleep 1
-    else
-        HEALTH_OK=0
-        break
+    publish_status "healthcheck"
+    HEALTH_OK=0
+    for _ in $(seq 1 30); do
+        if sudo systemctl is-active --quiet panel-bridge.service \
+            && sudo systemctl is-active --quiet panel-ui.service; then
+            HEALTH_OK=1
+            sleep 1
+        else
+            HEALTH_OK=0
+            break
+        fi
+    done
+    if [ "$HEALTH_OK" -eq 0 ]; then
+        publish_status "rolling_back" "services failed healthcheck on $VERSION"
+        if [ -n "$PREV_TARGET" ] && [ -d "$PREV_TARGET" ]; then
+            ln -sfn "$PREV_TARGET" "$PANEL_ROOT/current.new"
+            mv -T "$PANEL_ROOT/current.new" "$PANEL_ROOT/current"
+            sudo systemctl restart panel-bridge.service panel-ui.service 2>/dev/null || true
+            # Restore previous installed.json snapshot if we can find it.
+            [ -f "$PREV_TARGET/manifest.json" ] && cp "$PREV_TARGET/manifest.json" "$PANEL_ROOT/installed.json"
+        fi
+        fail "service healthcheck failed"
     fi
-done
-if [ "$HEALTH_OK" -eq 0 ]; then
-    publish_status "rolling_back" "services failed healthcheck on $VERSION"
-    if [ -n "$PREV_TARGET" ] && [ -d "$PREV_TARGET" ]; then
-        ln -sfn "$PREV_TARGET" "$PANEL_ROOT/current.new"
-        mv -T "$PANEL_ROOT/current.new" "$PANEL_ROOT/current"
-        sudo systemctl restart panel-bridge.service panel-ui.service 2>/dev/null || true
-        # Restore previous installed.json snapshot if we can find it.
-        [ -f "$PREV_TARGET/manifest.json" ] && cp "$PREV_TARGET/manifest.json" "$PANEL_ROOT/installed.json"
-    fi
-    fail "service healthcheck failed"
 fi
 
 # ===== flash C6 over UART =====

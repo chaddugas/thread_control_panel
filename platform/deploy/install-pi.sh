@@ -328,6 +328,31 @@ lib_prune_old_versions "$PREV_TARGET"
 
 rm -rf "$STAGING"
 
+# ===== remove Pi-imager's blanket NOPASSWD: ALL =====
+#
+# Pi-imager's first-boot setup writes `chaddugas ALL=(ALL) NOPASSWD:ALL`
+# into /etc/sudoers.d/010_pi-nopasswd, which makes EVERY sudo invocation
+# password-free — including ones never intended (apt, arbitrary scripts,
+# etc.). Our /etc/sudoers.d/panel-bridge rules are scoped to specific
+# commands; the Pi-imager rule undoes that scoping by allowing everything
+# else.
+#
+# Defense in depth: remove the Pi-imager drop-in so passwordless sudo is
+# limited to what /etc/sudoers.d/panel-bridge explicitly grants. Future
+# install-pi.sh re-runs (and any other interactive sudo) will prompt for
+# password as normal Linux behavior — sudo's ~15min credential cache
+# means a single password entry covers a typical session.
+#
+# Done at the end of install-pi.sh so all the earlier sudo-needing setup
+# (apt install, systemctl, sudoers writes, etc.) runs without prompting
+# even on a fresh Pi where Pi-imager's drop-in is still active.
+# Idempotent: no-op if the file's already gone (re-run case).
+
+if [ -f /etc/sudoers.d/010_pi-nopasswd ]; then
+    echo "→ Removing Pi-imager's NOPASSWD:ALL drop-in (defense-in-depth)..."
+    sudo rm /etc/sudoers.d/010_pi-nopasswd
+fi
+
 # ===== done =====
 
 cat <<EOF
