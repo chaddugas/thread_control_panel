@@ -122,25 +122,22 @@ Today the C6 firmware has `CONFIG_MQTT_USERNAME` and `CONFIG_MQTT_PASSWORD` bake
 
 **Validation plan** — when beta.29 is cut:
 
-1. **Local build (Mac)**:
+1. **Local build (Mac)** — confirms creds are gone from the binary:
    ```bash
    cd panels/feeding_control/firmware && idf
    idf.py reconfigure                                          # purge orphaned CONFIG_MQTT_USERNAME/PASSWORD
    grep -E '^CONFIG_MQTT_(USERNAME|PASSWORD)' sdkconfig        # must return nothing
    idf.py build
-   strings build/feeding_control.bin | grep -i myvxan          # must return nothing — security acceptance
+   strings build/thread_panel_feeding_control.bin | grep -i myvxan  # must return nothing — security acceptance
    ```
-2. **Pre-OTA migration on production Pi** (SSH in):
+2. **Cut beta.29** from the Mac. Release notes describe the migration step for existing Pis (re-run install-pi.sh from this release to seed `mqtt_creds.json`).
+3. **HACS** update Thread Panel integration → restart HA.
+4. **Run install-pi.sh from beta.29 on production Pi** (SSH in). Use the explicit-tag URL since `releases/latest` skips prereleases:
    ```bash
-   sudo tee /opt/panel/mqtt_creds.json >/dev/null <<'EOF'
-   {"username": "mqtt_user", "password": "<current-password>"}
-   EOF
-   sudo chown $USER /opt/panel/mqtt_creds.json
-   sudo chmod 0600 /opt/panel/mqtt_creds.json
+   curl -sSL https://github.com/chaddugas/thread_control_panel/releases/download/v2.0.0-beta.29/install-pi.sh | bash
    ```
-3. **Cut beta.29** from Mac with a release-notes block describing this migration step for anyone else following along.
-4. **HACS** update Thread Panel integration → restart HA.
-5. **Trigger OTA** from HA's update entity. Should succeed end-to-end thanks to the periodic re-send (within 60s of the C6 booting new firmware, the bridge re-sends `panel_set_creds`, C6 writes NVS + commits the partition + connects MQTT, `verifying_c6` sees `state/version`).
+   The MQTT-creds prompt fires (the file doesn't exist on a pre-Group-A Pi), enter the current Mosquitto user/pass. install-pi.sh validates per the new rules (12–128 char password, 2-of-3 char classes, no `"`/`\`), writes `/opt/panel/mqtt_creds.json` at 0600, installs beta.29 bridge + UI, restarts services. The new bridge begins re-sending `panel_set_creds` over UART; the still-running OLD C6 firmware ignores the unknown envelope harmlessly. Chosen over a manual `tee`-pre-seed because it exercises the canonical install path including the validation rules.
+5. **Trigger OTA** from HA's update entity. `panel-update.sh` runs, downloads beta.29 again (most Pi-side steps no-op since install-pi.sh already swapped), then `panel-flash` flashes the C6. Within 60s of the C6 booting new firmware, the bridge's periodic re-send delivers `panel_set_creds`, C6 writes NVS + commits the partition + connects MQTT, `verifying_c6` sees `state/version`.
 6. **Power-cycle test**: unplug + replug the panel. On cold boot, C6 reads NVS → has creds → connects MQTT immediately. Confirms NVS persistence across reboots.
 7. **(Optional) In-place rotation smoke test**: `sudo touch /opt/panel/mqtt_creds.json` → bridge file-watcher fires within 5s → C6 receives `panel_set_creds` → no-ops on identical creds. Confirms the rotation path is wired up for Group B.
 
