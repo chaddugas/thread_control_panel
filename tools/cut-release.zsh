@@ -598,6 +598,21 @@ PY
   # ----- release notes -----
   local notes_file="$staging/notes.md"
   {
+    # Install section first — this is the most common reason someone lands
+    # on a release page, and the version-specific tag URL is awkward to
+    # construct by hand. README has the placeholder/canonical form; the
+    # release page has the paste-ready exact-tag command.
+    print "## Install"
+    print ""
+    print "On the Pi (panel host):"
+    print ""
+    print '```bash'
+    print "curl -sSL https://github.com/$gh_repo/releases/download/$new_version/install-pi.sh -o /tmp/install-pi.sh"
+    print "bash /tmp/install-pi.sh $new_version"
+    print '```'
+    print ""
+    print "On the HA box: install via HACS as a custom repository, or manually download \`thread_panel.zip\` from this release and unzip into \`/config/custom_components/thread_panel/\` (then restart HA)."
+    print ""
     if [[ -n "$latest" ]]; then
       print "## Changes since $latest"
       print ""

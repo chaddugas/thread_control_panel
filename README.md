@@ -6,6 +6,34 @@ A platform for building no-WiFi, Thread-based touchscreen control panels for Hom
 
 Each panel pairs a Raspberry Pi Zero 2 W (display + touch + sensors) with a Seeed XIAO ESP32-C6 (Thread + MQTT-over-TLS). The Pi has no network in production; all HA traffic flows through the C6 over the Thread mesh.
 
+## Install
+
+### Pi (panel host)
+
+SSH to the Pi, then download `install-pi.sh` from the appropriate release and run it. The script prompts for MQTT credentials on first run, downloads release artifacts from GitHub, sets up systemd units, and starts the bridge + UI services.
+
+```bash
+# Latest stable
+curl -sSL https://github.com/chaddugas/thread_control_panel/releases/latest/download/install-pi.sh -o /tmp/install-pi.sh
+bash /tmp/install-pi.sh
+
+# Specific version (required for prereleases — the "latest" URL and the
+# script's internal default both use GitHub's /releases/latest API, which
+# skips prereleases)
+curl -sSL https://github.com/chaddugas/thread_control_panel/releases/download/v<VERSION>/install-pi.sh -o /tmp/install-pi.sh
+bash /tmp/install-pi.sh v<VERSION>
+```
+
+The download-then-run pattern (rather than `curl ... | bash`) is required for the credentials prompt to read from your terminal rather than the consumed script body.
+
+### Home Assistant integration
+
+Install via HACS as a custom repository — point HACS at this repo URL. Update notifications surface in HACS' UI; the integration ships as `thread_panel.zip` per release and HACS handles install + upgrade.
+
+For a manual install (no HACS), download `thread_panel.zip` from a release and unzip into `/config/custom_components/thread_panel/`, then restart HA.
+
+Each release page (Releases tab) auto-includes the exact install command for that tag, paste-ready.
+
 ## Repo layout
 
 ```
