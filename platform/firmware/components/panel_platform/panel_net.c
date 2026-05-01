@@ -11,6 +11,8 @@
 #include "esp_partition.h"
 #include "mqtt_client.h"
 #include "esp_tls.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include "sdkconfig.h"
 
 #include "lwip/dns.h"
@@ -31,10 +33,76 @@ static const char *TAG = "panel_net";
 extern const uint8_t ca_cert_pem_start[] asm("_binary_ca_cert_pem_start");
 extern const uint8_t ca_cert_pem_end[] asm("_binary_ca_cert_pem_end");
 
+// MQTT credentials live in NVS rather than CONFIG_MQTT_USERNAME /
+// CONFIG_MQTT_PASSWORD so published firmware.bin artifacts carry no
+// credentials. Provisioning happens over UART via panel_set_creds (see
+// panel_app.c), which calls panel_net_set_credentials() below.
+#define MQTT_CREDS_NVS_NAMESPACE "panel_mqtt"
+#define MQTT_CREDS_NVS_KEY_USER  "user"
+#define MQTT_CREDS_NVS_KEY_PASS  "pass"
+
+// In-memory copies populated from NVS at boot (or by
+// panel_net_set_credentials at runtime). esp-mqtt holds pointers into
+// these for the lifetime of the client, so the buffers must be static.
+// Sized to match the install-pi.sh validation caps (64 user, 128 pass)
+// plus a null terminator.
+#define MQTT_USER_MAX_LEN 65
+#define MQTT_PASS_MAX_LEN 129
+static char s_mqtt_user[MQTT_USER_MAX_LEN] = {0};
+static char s_mqtt_pass[MQTT_PASS_MAX_LEN] = {0};
+
 static bool s_mqtt_started = false;
 static esp_mqtt_client_handle_t s_client = NULL;
 static volatile bool s_connected = false;
 static const char *s_availability_topic = NULL;
+
+static bool creds_present(void)
+{
+    return s_mqtt_user[0] != '\0' && s_mqtt_pass[0] != '\0';
+}
+
+// Pull username + password from the NVS panel_mqtt namespace into the
+// static in-memory globals. Returns true iff both keys loaded
+// successfully — partial reads (one key present, the other missing)
+// are treated as "unprovisioned" and the in-memory copies stay empty.
+static bool load_creds_from_nvs(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(MQTT_CREDS_NVS_NAMESPACE, NVS_READONLY, &h);
+    if (err != ESP_OK)
+    {
+        // First boot or post-erase — no namespace yet. Not an error.
+        return false;
+    }
+
+    char user_buf[MQTT_USER_MAX_LEN] = {0};
+    char pass_buf[MQTT_PASS_MAX_LEN] = {0};
+    size_t user_len = sizeof(user_buf);
+    size_t pass_len = sizeof(pass_buf);
+
+    bool ok = true;
+    if (nvs_get_str(h, MQTT_CREDS_NVS_KEY_USER, user_buf, &user_len) != ESP_OK)
+    {
+        ok = false;
+    }
+    if (nvs_get_str(h, MQTT_CREDS_NVS_KEY_PASS, pass_buf, &pass_len) != ESP_OK)
+    {
+        ok = false;
+    }
+    nvs_close(h);
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    // Atomically install both into the in-memory globals. snprintf
+    // is overkill but matches the codebase's idiom for length-bounded
+    // string copies and guarantees null termination.
+    snprintf(s_mqtt_user, sizeof(s_mqtt_user), "%s", user_buf);
+    snprintf(s_mqtt_pass, sizeof(s_mqtt_pass), "%s", pass_buf);
+    return true;
+}
 
 static void log_error_if_nonzero(const char *message, int error_code)
 {
@@ -143,8 +211,8 @@ static void start_mqtt_client(void)
 {
     configure_thread_dns();
 
-    ESP_LOGI(TAG, "Starting MQTT client, connecting to %s",
-             CONFIG_MQTT_BROKER_URI);
+    ESP_LOGI(TAG, "Starting MQTT client, connecting to %s as %s",
+             CONFIG_MQTT_BROKER_URI, s_mqtt_user);
 
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker = {
@@ -154,9 +222,9 @@ static void start_mqtt_client(void)
             },
         },
         .credentials = {
-            .username = CONFIG_MQTT_USERNAME,
+            .username = s_mqtt_user,
             .client_id = CONFIG_MQTT_CLIENT_ID,
-            .authentication = {.password = CONFIG_MQTT_PASSWORD},
+            .authentication = {.password = s_mqtt_pass},
         },
         .session = {
             // When s_availability_topic is NULL, .topic is NULL, which
@@ -226,6 +294,13 @@ static void maybe_start_mqtt(otInstance *instance)
     {
         return;
     }
+    if (!creds_present())
+    {
+        // Provisioning hasn't completed yet — bridge will send
+        // panel_set_creds shortly after the UART link comes up. Stay
+        // idle (Thread up, no MQTT) until that arrives.
+        return;
+    }
     if (thread_attached(instance) && has_routable_address(instance))
     {
         s_mqtt_started = true;
@@ -251,6 +326,20 @@ static void thread_state_changed_callback(otChangedFlags flags, void *context)
 
 void panel_net_start(void)
 {
+    // Load MQTT credentials from NVS if previously provisioned. If the
+    // namespace doesn't exist yet (first boot, post-erase, etc.), we
+    // stay in the "unprovisioned" state — MQTT won't start until
+    // panel_net_set_credentials() is called via panel_set_creds UART.
+    if (load_creds_from_nvs())
+    {
+        ESP_LOGI(TAG, "Loaded MQTT credentials from NVS (user=%s)", s_mqtt_user);
+    }
+    else
+    {
+        ESP_LOGW(TAG, "MQTT credentials not in NVS — waiting for "
+                      "provisioning over UART (panel_set_creds)");
+    }
+
     otInstance *instance = esp_openthread_get_instance();
     if (!instance)
     {
@@ -276,7 +365,7 @@ void panel_net_start(void)
     // MQTT immediately rather than waiting for the next state change.
     maybe_start_mqtt(instance);
 
-    ESP_LOGI(TAG, "Waiting for Thread attach + OMR address before starting MQTT");
+    ESP_LOGI(TAG, "Waiting for Thread attach + OMR address + creds before starting MQTT");
 }
 
 int panel_net_publish(const char *topic, const char *data, int len,
@@ -315,4 +404,82 @@ void panel_net_resume(void)
     ESP_LOGI(TAG, "Resuming MQTT client");
     esp_mqtt_client_start(s_client);
     s_mqtt_started = true;
+}
+
+esp_err_t panel_net_set_credentials(const char *user, const char *pass)
+{
+    if (!user || !pass || user[0] == '\0' || pass[0] == '\0')
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (strlen(user) >= MQTT_USER_MAX_LEN || strlen(pass) >= MQTT_PASS_MAX_LEN)
+    {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    // No-op when in-memory copies already match — avoids unnecessary
+    // NVS writes on every bridge restart, which the bridge does
+    // unconditionally to keep the provisioning path simple.
+    if (strcmp(s_mqtt_user, user) == 0 && strcmp(s_mqtt_pass, pass) == 0)
+    {
+        ESP_LOGD(TAG, "panel_net_set_credentials: unchanged, ignoring");
+        return ESP_OK;
+    }
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(MQTT_CREDS_NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "nvs_open(%s, RW) failed: %s",
+                 MQTT_CREDS_NVS_NAMESPACE, esp_err_to_name(err));
+        return err;
+    }
+
+    err = nvs_set_str(h, MQTT_CREDS_NVS_KEY_USER, user);
+    if (err == ESP_OK)
+    {
+        err = nvs_set_str(h, MQTT_CREDS_NVS_KEY_PASS, pass);
+    }
+    if (err == ESP_OK)
+    {
+        err = nvs_commit(h);
+    }
+    nvs_close(h);
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Persisting MQTT credentials to NVS failed: %s",
+                 esp_err_to_name(err));
+        return err;
+    }
+
+    // Now that NVS holds the new values, install them in-memory.
+    snprintf(s_mqtt_user, sizeof(s_mqtt_user), "%s", user);
+    snprintf(s_mqtt_pass, sizeof(s_mqtt_pass), "%s", pass);
+    ESP_LOGI(TAG, "MQTT credentials updated in NVS (user=%s)", s_mqtt_user);
+
+    // Bring (or rebring) the MQTT client up against the new creds. If
+    // it was already running we tear it down first; esp-mqtt holds
+    // pointers into our strings but the destroy here is followed by a
+    // fresh init in start_mqtt_client, so there's no aliasing issue.
+    if (s_client)
+    {
+        ESP_LOGI(TAG, "Restarting MQTT client with new credentials");
+        esp_mqtt_client_stop(s_client);
+        esp_mqtt_client_destroy(s_client);
+        s_client = NULL;
+        s_mqtt_started = false;
+        s_connected = false;
+    }
+
+    otInstance *instance = esp_openthread_get_instance();
+    if (instance)
+    {
+        // If Thread is already attached + has OMR, MQTT starts now.
+        // Otherwise the OpenThread state-change callback will do it
+        // when those conditions are met.
+        maybe_start_mqtt(instance);
+    }
+
+    return ESP_OK;
 }

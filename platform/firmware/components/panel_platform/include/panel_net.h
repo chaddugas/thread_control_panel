@@ -1,5 +1,7 @@
 #pragma once
 
+#include "esp_err.h"
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -46,6 +48,24 @@ extern "C"
      */
     void panel_net_pause(void);
     void panel_net_resume(void);
+
+    /**
+     * Persist MQTT credentials to NVS and (re)start the MQTT client
+     * with them. Called from panel_app's panel_set_creds UART handler
+     * after the bridge sends provisioning.
+     *
+     * Idempotent — if `user` and `pass` already match what's in
+     * memory, the NVS write is skipped and ESP_OK is returned without
+     * touching the running client. The bridge always sends at startup
+     * regardless of state, so this is the hot path on every boot.
+     *
+     * Returns:
+     *   ESP_OK                 — credentials committed (or unchanged)
+     *   ESP_ERR_INVALID_ARG    — null/empty user or pass
+     *   ESP_ERR_INVALID_SIZE   — user >= 64 chars or pass >= 128 chars
+     *   ESP_ERR_NVS_*          — underlying NVS failure
+     */
+    esp_err_t panel_net_set_credentials(const char *user, const char *pass);
 
 #ifdef __cplusplus
 }

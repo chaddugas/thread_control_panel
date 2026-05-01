@@ -50,6 +50,41 @@ static bool s_ha_online = false;
 // Pi needs sensor updates regardless of OTA state.
 static volatile bool s_ota_active = false;
 
+// Extract a JSON string field's value into out (null-terminated). Does
+// not handle backslash-escaped quotes — install-pi.sh enforces that
+// MQTT credentials don't contain `"` or `\`, which is the only caller
+// today. Returns true on success, false if the key wasn't found, the
+// closing quote was missing, or the value would overflow `out_size`.
+static bool extract_json_string_field(const char *line, const char *key,
+                                      char *out, size_t out_size)
+{
+    char pattern[64];
+    int p = snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
+    if (p <= 0 || p >= (int)sizeof(pattern))
+    {
+        return false;
+    }
+    const char *start = strstr(line, pattern);
+    if (!start)
+    {
+        return false;
+    }
+    start += p;
+    const char *end = strchr(start, '"');
+    if (!end)
+    {
+        return false;
+    }
+    size_t value_len = (size_t)(end - start);
+    if (value_len >= out_size)
+    {
+        return false;
+    }
+    memcpy(out, start, value_len);
+    out[value_len] = '\0';
+    return true;
+}
+
 // Gate every panel_uart_send_line we own behind UART OTA — the line is
 // carrying raw firmware bytes at 921600 baud during OTA and any JSON we
 // emit would corrupt it. HTTP OTA is fine to publish through (UART and
@@ -179,6 +214,58 @@ static void sensors_publish_task(void *arg)
     }
 }
 
+// Send the ack envelope back to the bridge after a panel_set_creds
+// receipt. Best-effort — if the UART link is busy or down, we just
+// don't ack. The bridge logs ack receipt for debug visibility but
+// doesn't block on it.
+static void send_panel_set_creds_ack(bool ok, const char *detail)
+{
+    char ack[160];
+    int n = snprintf(ack, sizeof(ack),
+                     "{\"type\":\"panel_set_creds_ack\","
+                     "\"ok\":%s,\"detail\":\"%s\"}",
+                     ok ? "true" : "false",
+                     detail ? detail : "");
+    if (n > 0 && n < (int)sizeof(ack))
+    {
+        (void)forward_to_pi_uart(ack, n);
+    }
+}
+
+// Pi → C6 provisioning: writes MQTT username + password to NVS and
+// (re)starts the MQTT client. Handled before the s_ha_online gate
+// because provisioning must work when HA is unreachable — that's
+// precisely when an unprovisioned panel needs to come online.
+static void handle_panel_set_creds(const char *line)
+{
+    char user[65] = {0};
+    char pass[129] = {0};
+
+    if (!extract_json_string_field(line, "username", user, sizeof(user)))
+    {
+        ESP_LOGW(TAG, "panel_set_creds: missing/oversized username");
+        send_panel_set_creds_ack(false, "missing or oversized username");
+        return;
+    }
+    if (!extract_json_string_field(line, "password", pass, sizeof(pass)))
+    {
+        ESP_LOGW(TAG, "panel_set_creds: missing/oversized password");
+        send_panel_set_creds_ack(false, "missing or oversized password");
+        return;
+    }
+
+    esp_err_t err = panel_net_set_credentials(user, pass);
+    if (err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "panel_set_creds rejected: %s", esp_err_to_name(err));
+        send_panel_set_creds_ack(false, esp_err_to_name(err));
+        return;
+    }
+
+    ESP_LOGI(TAG, "panel_set_creds applied (user=%s)", user);
+    send_panel_set_creds_ack(true, "");
+}
+
 static void on_uart_line(const char *line, size_t len)
 {
     ESP_LOGI(TAG, "UART RX (%u bytes): %s", (unsigned)len, line);
@@ -189,6 +276,15 @@ static void on_uart_line(const char *line, size_t len)
     if (strstr(line, "\"type\":\"ota_begin\"") != NULL)
     {
         (void)panel_ota_uart_handle_begin(line, len);
+        return;
+    }
+
+    // panel_set_creds: also handled before the ha_availability gate. An
+    // unprovisioned panel can't reach HA, so provisioning over UART is
+    // the only path to MQTT.
+    if (strstr(line, "\"type\":\"panel_set_creds\"") != NULL)
+    {
+        handle_panel_set_creds(line);
         return;
     }
 
