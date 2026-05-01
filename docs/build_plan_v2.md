@@ -1,12 +1,37 @@
 # Thread Control Panel — Build Plan V2
 
-> **Status: planning, no code changes yet.** V1 shipped 2026-04-28 (see [build_plan_v1.md](build_plan_v1.md) for the historical record + current production state).
->
-> V2 has two parts:
->
-> 1. **Step 17 — Artifact-based releases + HA-orchestrated remote updates.** The headline reshape: instead of the Pi pulling the full repo over `git`, releases are published as artifact bundles on GitHub Releases and the Pi installs only what it needs. Updates are triggered remotely via a HA `update.panel_firmware` entity that orchestrates the whole sequence: WiFi on, pull artifacts, flash C6 over UART, swap UI, restart services, WiFi off — without anyone touching the panel. Detailed phased plan below.
->
-> 2. **Steps 18–22 — Backlog promoted from V1's "V2 / Post-V1 follow-ups" section.** Coarser-grained items grouped by theme (setup/deploy, architecture, multi-device, robustness, hardware) that accumulated during V1 build. They sit at the end of this doc as a backlog for V2-era work; we'll detail and re-phase individually as each comes up. Some have natural dependencies on Step 17 and should land after it; others are independent.
+> **Status: V2 active.** Step 17 (Phases 1, 2, 3a, 3b) and Step 17b shipped — production runs v2.0.0-beta.28 with WiFi state surface, persistent journals, and HA-orchestrated remote updates. **Phase 1 — Security** is up next. See [build_plan_v1.md](build_plan_v1.md) for the V1 historical record + production-state reference.
+
+## Table of contents
+
+- [Status](#status)
+- [Keeping this current](#keeping-this-current)
+- [Goals](#goals)
+- [Non-goals](#non-goals)
+- [Architecture (V2 end-state)](#architecture-v2-end-state)
+- [Phase 1 — Security](#phase-1--security)
+- [Phase 2 — Polish & cleanup](#phase-2--polish--cleanup)
+- [Phase 3+ — Themed groups](#phase-3--themed-groups)
+- [Future / new panel ideas](#future--new-panel-ideas)
+- [Completed work (historical reference)](#completed-work-historical-reference)
+- [Reference](#reference)
+- [Lessons Learned](#lessons-learned)
+- [Proven Facts](#proven-facts)
+- [Technical Debt](#technical-debt)
+
+## Status
+
+V2 development is active. Shipped through v2.0.0-beta.28:
+
+- **Step 17 Phase 1**: artifact-based releases + repo restructure ✅
+- **Step 17 Phase 2**: C6 UART OTA receiver + panel-flash CLI ✅
+- **Step 17 Phase 3a**: Pi-side update orchestration ✅
+- **Step 17 Phase 3b**: HA-side `update.PanelUpdateEntity` ✅
+- **Step 17b**: WiFi state surface + observability ✅
+
+**Up next**: [Phase 1 — Security](#phase-1--security) (move MQTT credentials out of firmware, rotate creds, scrub historical leakage, tighten authorization surface, add OTA tamper-resistance).
+
+After Phase 1: [Phase 2 — Polish & cleanup](#phase-2--polish--cleanup), then themed groups in no strict order.
 
 ## Keeping this current
 
@@ -15,80 +40,26 @@ Same convention as V1. After completing a step or making a non-trivial decision:
 - Strike through the finished step (`~~**Step name**~~`) and append `✅ DONE`.
 - Move the `(next up)` marker.
 - Record meaningful learnings in **Lessons Learned**, validated invariants in **Proven Facts**, and known-but-deferred problems in **Technical Debt**.
-- Refresh **Current Status** when a major capability lands or changes.
+- Refresh **Status** when a major capability lands or changes.
 - Edit/remove anything the work has invalidated rather than leaving stale guidance behind.
 
 When V2 ships and the V2 patterns become "current production state," migrate the still-authoritative bits (MQTT topic additions, UART protocol additions, etc.) into a consolidated reference (likely a successor `build_plan_v3.md`) so v1 + v2 don't drift into mutual contradiction.
 
-## Current Status
-
-Phase 1 (artifact-based releases + repo restructure) ✅ DONE.
-Phase 2 (C6 UART OTA receiver + panel-flash CLI) ✅ DONE.
-Phase 3a (Pi-side update orchestration: cmd/update → panel-update.sh → C6 reboot) ✅ DONE — validated end-to-end through beta.11 with both originally-blocking bugs fixed.
-Phase 3b (HA-side `update.PanelUpdateEntity`) — **in progress**, code written, end-to-end validation blocked. See "Phase 3b — open issues" below.
-
-### Phase 3b — open issues (resume here)
-
-Code is in tree (update.py, OptionsFlow with prereleases toggle, post-OTA reboot in panel-update.sh, off-main release commit logic in cut-release.zsh). Through beta.20 we've gotten the integration installable via HACS, the entity to populate `installed_version` from MQTT, the OptionsFlow toggle to persist, the GitHub poll to return the actually-most-recent release, and "Update available" to show with a clickable Install button. The button-press install path is also confirmed working — the user did press Update once and it ran.
-
-**Resolved through betas 13–20** (kept here as future-proofing notes; if any of these come back, look here):
-
-1. ~~`latest_version` stays null after toggling Include Prereleases.~~ ✅ FIXED in beta.18 — OptionsFlow ordering bug (`async_reload` before `async_create_entry`). Replaced manual reload with `entry.add_update_listener(_async_reload_on_change)` in `__init__.async_setup_entry`; OptionsFlow now just returns `async_create_entry`, framework fires the listener.
-2. ~~HACS state caching across `content_in_root` flips~~ — HACS bug; left memory of the prior content_in_root: true setting in `HacsIntegrationRepository.path.remote`, producing the bizarre `'/manifest.json'` (leading slash) error. Workaround: delete device + integration + custom repo from HACS, restart HA, re-add. Not fixable from our side.
-3. ~~Doubled-path bug `custom_components/thread_panel/thread_panel/manifest.json`~~ ✅ FIXED in beta.19 — `git reset --hard` doesn't remove now-untracked empty dirs, so on subsequent cuts `cp -R src dst` saw existing `dst` and put `src` *inside* it. Pre-clean with `rm -rf custom_components` before the cp.
-4. ~~HACS doesn't substitute `{version}` in hacs.json's `filename`~~ ✅ FIXED in beta.19 — filename is now static `thread_panel.zip`; cut-release writes that name; manifest.json matcher updated.
-5. ~~Most-recent release wasn't actually most-recent in `latest_version`~~ ✅ FIXED in beta.20 — GitHub's /releases endpoint sorts by tag name lex desc, not chronological. With semver tags `v2.0.0-beta.9` sorts before `v2.0.0-beta.19`. update.py now sorts by `created_at` itself before picking.
-
-**Beta.21 results:**
-
-- ✅ A is fixed. The `async_release_notes` override removed the "Unknown error" banner.
-- ❌ New regression: at HA startup the entity loaded with `in_progress=true` and `update_percentage=100` even though no install was running. Cause: `state/update_status` is published retained by the C6 (panel_app.c line 245 — every `panel_state` envelope is published with retain=1), so on HA restart the broker replays the last terminal phase from the previous OTA. The new post-`done` hold state in beta.21 interprets that retained `done`/`rebooting` as a fresh terminal-success signal and enters the wait-for-version-match state with the 120s timer. Pre-beta.21 logic was tolerant of this because terminal phases unconditionally set `in_progress=False` — the new state machine surfaces the underlying retain bug.
-
-**Pre-beta.22 fix (in tree, awaiting validation):**
-
-`_on_update_status_message` now ignores retained messages (`if msg.retain: return`). update_status is an event stream, not state — there's no scenario where replaying a stale terminal phase at startup is correct. Consistent with the bridge's `update_status.py` tail loop which already seeks to end on first sight of `/opt/panel/update.status` for the same reason.
-
-**Still open as of pre-beta.22:**
-
-B. **`update_percentage` drives the install progress UI.** PHASE_PERCENTAGES + `UpdateEntityFeature.PROGRESS` landed in beta.21; need a real install to confirm the progress bar renders.
-
-C. **Post-`done` version-match hold.** Tracks `_pending_target_version` set in async_install, releases on version match or 120s timeout. Need a real install to confirm the entity stays in_progress through the C6 reboot and flips clean when the new version arrives.
-
-**Suggested validation order in beta.22:**
-
-1. Cut beta.22, install via HACS, restart HA. Entity should load with `in_progress=False`, `update_percentage=None`, no "Unknown error". (If `update_percentage` shows the last phase number even with `in_progress=False`, that's harmless — HA only renders it during in_progress.)
-2. Note: there are TWO update entities visible — ours (`update.feeding_control_firmware`, friendly_name "Feeding Control Firmware", supported_features=23, device_class=firmware) and HACS's auto-generated `update.thread_panel_update` (friendly_name "Thread Panel Update", tracks latest stable for HACS, no device_class). Don't confuse the two when capturing diagnostic state.
-3. Trigger an OTA from the entity. Watch for the progress bar climbing through the phase percentages. Entity should stay in_progress through the C6 reboot (~30-45s gap between `done` MQTT phase and the new `state/version`), then flip to "Up-to-date" cleanly when state/version arrives.
-4. Once steps 1–3 all check out, Phase 3b is genuinely shipped.
-
-**Architectural debt surfaced**: the firmware retain-everything pattern is wrong for event-stream topics like `update_status`. The integration-side fix is correct and ships immediately, but the firmware should distinguish state vs. event topics. Logged under Technical Debt below.
-
 ## Goals
 
-**Step 17 (the headline reshape):**
+V2 has shipped its core reshape — artifact-based releases, HA-orchestrated remote updates, and the WiFi state surface that closed Step 17b. Goals still in flight:
 
-1. **Eliminate full-repo presence on the Pi.** Pi carries only runnable artifacts (~5–10 MB per release vs. hundreds of MB of source/git history accumulated under the V1 git-pull model).
-2. **Trigger updates remotely from HA** via the native `update` entity domain — no SSH, no Mac required at deploy time. Click "Install" in HA, watch progress on the panel screen.
-3. **Pi spends <60s online per update window**; offline by default. The orchestration script enables WiFi, does its work, and disables WiFi at the end (success or failure with a healthcheck pass).
-4. **C6 firmware rides the existing UART link at high baud** (~15s for a full firmware) — supersedes the Thread-OTA path from V1 step 13. The HTTP-OTA-over-Thread machinery stays in the tree as a fallback (~15–20 min, slow but functional) until V2 is proven; it is no longer the primary path.
-5. **Move `custom_components/thread_panel/` into `platform/integration/`** where it architecturally belongs. HACS still requires `custom_components/<domain>/manifest.json` to exist *in the tag's tree* for validation (the original V2 plan was wrong on this — `zip_release: true` only affects the download path, not tree validation), so `cut-release` synthesizes an off-main release commit that mirrors `platform/integration/thread_panel/` into `custom_components/thread_panel/`, tags that commit, and resets main back. Main stays clean; the tag's tree satisfies HACS. Off-main commit is reachable only via the tag (see "Off-main release commit" under cut-release below).
-6. **Beta-friendly versioning** so iteration on V2 itself can ship as `v2.0.0-beta.N` releases without confusing the stable update channel.
+1. **Security hardening** — move MQTT credentials out of the firmware binary, rotate the leaked password, scrub historical artifacts, tighten the authorization surface, sign OTA payloads. Detailed in [Phase 1](#phase-1--security).
+2. **Code quality + multi-panel readiness** — reorganize `panels/<id>/` for clean drop-in of new panels, sweep dead code, DRY where natural, comment hygiene, foundational tests. Detailed in [Phase 2](#phase-2--polish--cleanup).
+3. **Iterative improvements** — themed groups beyond Phase 2 (small fixes, robustness, HA UX, hardware affordances, etc.). Detailed in [Phase 3+](#phase-3--themed-groups).
 
-**Backlog (Steps 18–22) — additional V2 goals carried over from V1:**
+## Non-goals
 
-7. **One-command Pi bootstrap** from a fresh Pi OS Lite image, plus per-host kiosk-renderer choice and a long-overdue cleanup of dev shell helpers. (Step 18)
-8. **Tighter platform/product separation in the integration and repo layout** — interactive config flow instead of YAML paste, unified device↔Pi↔UI association, ui-core "unconfigured panel" splash, possibly collapsing `panels/<id>/firmware` and `panels/<id>/ha` into platform-driven configs. (Step 19)
-9. **Per-device identity** so the system can scale past a single panel — NVS-provisioned per-device MQTT credentials at first boot. (Step 20)
-10. **Robustness** — automated tests, MQTT fragmentation handling, C6 UART boot-noise filter, WPE bubblewrap proper fix, runtime-tunable presence/theme thresholds via HA. (Step 21)
-11. **Hardware affordances** — backlight brightness control if the display gets swapped or a software dim works, Thread mesh resilience monitoring as a HA diagnostic sensor. (Step 22)
+- **HACS publication to the default community store.** The project depends on custom-assembled hardware that almost no one else can use; HACS distribution adds packaging burden without real audience. Stays as private install (manual zip, or HACS as a custom repository).
+- **Auto-install on a schedule** (cron-style "install at 3am Sunday"). Manual-trigger only — HA notices the new version and surfaces it in the entity, the user clicks Install when ready.
+- **CI-based builds.** `cut-release` runs on the Mac (where dev work happens anyway). Moving to GitHub Actions is a V3 question.
 
-## Non-goals (V2)
-
-- HACS publication to the default community store. The project depends on custom-assembled hardware that almost no one else can use; HACS distribution adds packaging burden without real audience. Stays as private install (manual zip, or HACS as a custom repository).
-- Auto-install on a schedule (cron-style "install at 3am Sunday"). Manual-trigger only — HA notices the new version and surfaces it in the entity, the user clicks Install when ready.
-- CI-based builds. `cut-release` runs on the Mac (where dev work happens anyway). Moving to GitHub Actions is a V3 question.
-
-## End-state architecture
+## Architecture (V2 end-state)
 
 ```
 GitHub Release v2.0.0
@@ -119,23 +90,163 @@ HA box:
 custom_components/thread_panel/      # extracted from release zip (manual or HACS-as-custom-repo)
 ```
 
-## Phasing
+---
 
-Land in this order, each as its own commit + release. Each phase leaves the system in a working, releasable state.
+## Phase 1 — Security
 
-- **Phase 1** — Repo restructure + artifact-based releases. Manual SSH update on Pi until Phase 3.
-- **Phase 2** — C6 UART OTA receiver. Validated via a manual `panel-flash` Pi-side CLI. Independent of Phase 3, immediately useful.
-- **Phase 3** — HA-orchestrated update flow. Wires everything together.
+The MQTT broker password is published in every `firmware.bin` release artifact and trivially extractable with `strings`. Phase 1 closes that hole, rotates the leaked credential, and tightens the surrounding authorization surface so a future leak has less reach.
 
-Each phase is roughly 1–2 days of work.
+Confirmed scope (no deferred items — every group is committed Phase 1 work).
+
+### Group A: Move MQTT credentials out of firmware
+
+Today the C6 firmware has `CONFIG_MQTT_USERNAME` and `CONFIG_MQTT_PASSWORD` baked in via sdkconfig. Every published `firmware.bin` carries them. `strings firmware.bin | grep -i myvxan` returns the password instantly.
+
+- C6 firmware: read MQTT creds from NVS at startup. New "provisioning required" state when NVS is empty — firmware sits idle (Thread up, no MQTT client) until it receives provisioning over UART.
+- Add UART envelope `panel_set_creds` (Pi → C6) carrying `{username, password}`. C6 writes to NVS, then (re)starts its MQTT client with the new creds.
+- Bridge: read `/opt/panel/mqtt_creds.json` (mode 0600, root-only) at startup; send via the new UART envelope. Watch for file changes and re-provision so credential rotation is in-place.
+- `install-pi.sh`: prompt for MQTT username + password (gum prompts), write to `/opt/panel/mqtt_creds.json`. Validation: non-empty username, password ≥ 12 chars.
+- sdkconfig: remove `CONFIG_MQTT_USERNAME` / `CONFIG_MQTT_PASSWORD`. Defaults become empty; firmware refuses to connect until provisioned.
+- Acceptance: `strings firmware.bin | grep -i pass` returns nothing for the post-Phase-1 firmware artifacts.
+
+### Group B: Rotate credentials + scrub historical leakage
+
+- Generate a new MQTT username + password.
+- Update broker config + the production panel's `mqtt_creds.json`. Verify the panel reconnects.
+- Delete (or replace with sanitized binaries) the `firmware.bin` and `panel-bridge-*.tar.gz` assets in all published GitHub releases. Tags can stay — assets are what carry the credentials.
+- Note: the credential rotation is what actually closes the hole. GitHub CDN may keep cached copies briefly; asset deletion is hygiene, not the primary fix.
+
+### Group C: Authorization surface tightening
+
+- Replace wildcards in `/etc/sudoers.d/panel-bridge` with the specific subcommands actually used:
+  - `/usr/bin/nmcli *` → individual nmcli commands (`radio wifi on|off`, `connection delete`, `connection add`, `connection up`, `device wifi list`, `device status`, `device show wlan0`, `monitor`).
+  - `/usr/bin/systemctl is-active *` → specific services.
+  - `/usr/bin/chvt *`, `/usr/bin/setfont *`, `/usr/bin/setterm *` — audit and tighten where possible.
+- Override Pi-imager's `/etc/sudoers.d/010_pi-nopasswd` (NOPASSWD: ALL, noted under Proven Facts) — remove or override during install-pi.sh hardening so our restrictive entries are the only allowance.
+- Default-exclude `text.thread_panel_*_wifi_password` from HA's recorder — ship a recorder-exclude rule with the integration rather than asking users to opt out via global config.
+
+### Group D: OTA tamper-resistance (firmware signing)
+
+- Generate an ed25519 signing keypair (offline; private key stored only on the build machine).
+- During `cut-release`: sign `firmware.bin` with the private key; attach `firmware.bin.sig` as a release artifact.
+- During `panel-update.sh`: download the signature alongside the binary; verify against the bundled public key (compiled into the bridge or stored under `/opt/panel/`) before forwarding to the C6.
+- Public key bundled in the bridge tarball; rotated only if the private key is suspected compromised.
+- Decision: not pursuing C6 hardware secure boot in this phase. The bridge-verified pipeline closes the OTA-tamper threat without invasive C6 changes; secure boot stays available as a future hardening step if the threat model warrants.
 
 ---
 
-## Phase 1 — Repo restructure + artifact releases
+## Phase 2 — Polish & cleanup
+
+No new features in this phase. Goal: well-organized, dead-code-free, DRYed, simplified, accurately commented, ready for new panels to drop in.
+
+### Group A: Repo organization + multi-panel prep
+
+- Move `panels/<id>/firmware/main/panel_app.c` shim contents into `platform/firmware/` driven by config. End state: `panels/<id>/` contains a UI directory + manifest + small config snippet only.
+- Same treatment for `panels/<id>/ha/manifest.yaml` (becomes a manifest reference, no code).
+- Acceptance: dropping in a new panel = UI bundle + manifest + a few lines of config, zero firmware fork.
+
+### Group B: Dead code & file removal sweep
+
+- Audit each top-level dir for unreferenced files. Known: V1 fallbacks (`tools/panel-ota` Thread-OTA path) superseded by V2 — flagged for removal once V2 is proven, which it now is.
+- Audit Python imports for unused, dead conditionals.
+- Remove HACS-validation workflow remnants if any remain.
+
+### Group C: DRY + simplification pass
+
+- Bridge: per-control sudo wrappers and similar mqtt subscription patterns — fold to shared helpers where natural.
+- Integration: per-entity MQTT subscribe boilerplate is heavily repeated; consider an entity-base helper.
+- Firmware: panel_state forwarding pattern repeated in many places.
+- Cross-cutting: search for "look at where this is duplicated" with fresh eyes.
+
+### Group D: Comment hygiene
+
+- Sweep for stale comments referencing pre-Step-17b assumptions.
+- Remove "this is for X" comments where X has changed.
+- Update CLAUDE.md and the architecture paragraph in build_plan to reflect today's reality.
+
+### Group E: Test foundation
+
+- Bridge unit tests for the state cache + WS broadcast logic (pytest, minimal mocking).
+- Integration tests that `_handle_resync` republishes everything (HA test framework supports this).
+- UI component tests on the data-shape parsing in `useFeeder` (Vitest).
+- Note: firmware build verification + end-to-end smoke tests stay deferred to V3 CI work.
+
+---
+
+## Phase 3+ — Themed groups
+
+Named groups, no strict ordering. Pick whichever fits the moment when each becomes the right time.
+
+### Quality of life (small fixes & polish)
+
+- Bump OTA `waiting_for_connection` timeout to 120s (real-world observation of 63s connection-up suggests current 60s is too tight).
+- Refine `PHASE_PERCENTAGES` based on real OTA timing data (creating_venv currently dominates; bar jumps 0→60% then hangs).
+- Switch cut-release notes editor from vim to nano (vim `:q` cancels the release while still incrementing the version counter).
+- Investigate GitHub release sort order weirdness on the releases page + HACS picker (current order: beta.28, beta.26, beta.9-4, beta.25, beta.24, ... — neither chronological nor alphabetical).
+- Persistent journald on existing panels — document the manual one-liner in the README, or wire into install-pi.sh hardening.
+
+### Robustness & correctness
+
+- C6 `panel_state` envelope schema split into event vs state types — closes the retain-everything gap that beta.22 papered over.
+- MQTT message fragmentation handling on the C6 — multi-callback assembly removes the 8 KB buffer band-aid.
+- C6 UART rx state machine ignoring boot noise — start accumulating after seeing `{`, drop bytes that don't fit a JSON-line pattern.
+- Slow post-power-cycle data backfill — needs landmark instrumentation before it's fixable. Add timestamped log lines at C6 thread-up, mqtt-connected, first-state-published; bridge ws-up, first-mqtt-msg-received; UI mount, first-entity-render.
+
+### HA integration UX features
+
+- Replace YAML-paste manifest with a real config flow (interactive entity picker, multi-select, attribute allowlists).
+- "Unconfigured panel" splash in `platform/ui-core` (friendly setup-instructions screen instead of blank/directory listing).
+- Configurable presence/theme thresholds via HA `number` entities (replaces `.env.production` constants — tune without rebuilding).
+- WiFi UX: known-networks select + disable password field for known networks (don't require a password on already-saved profiles).
+
+### Pi-side observability + correctness
+
+- Pi clock drift fix: have the C6 broadcast time-of-day over MQTT; UI reads from there instead of local `Date()`.
+- Ambient light sensor sensitivity bump — lower the C6 ADC publish threshold (companion to HA-driven thresholds in the UX group).
+
+### Release pipeline maturity
+
+- Per-component release cadence: sha-skipping approach where cut-release only re-uploads components whose content changed, and `update.py` compares the integration's sha across releases.
+- Tag-based filtering improvements that fall out of the GitHub sort fix.
+
+### Hardware affordances (mostly opportunistic)
+
+- Software brightness control (hardware-gated on a swappable display).
+- Thread mesh resilience monitoring (OpenThread mesh-error counters as HA diagnostic sensor).
+- Cold-start LCD streakiness investigation (thermal test, PSU rail scope).
+
+### Developer ergonomics
+
+- `install-pi.sh` full bootstrap from fresh Pi OS Lite (folds in `dtoverlay=disable-bt`, NetworkManager, console-setup, installing any dependencies, all the V1-step prose).
+- Kiosk-renderer choice via flag (`--cog` vs `--cage`).
+- WPE bubblewrap sandbox proper fix (currently bypassed via `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`).
+- Direnv + shell helper cleanup; cut-release sourced-function staleness.
+
+### Multi-device support (triggered by panel #2 actually existing)
+
+- Per-device MQTT credentials + per-device Mosquitto ACLs. install-pi.sh's prompt grows a panel_id input and generates a random per-device password if not supplied. Mosquitto ACL grants each per-device user only `thread_panel/<panel_id>/*`.
+- Consistent device ↔ Pi ↔ UI association layer (probably a `device/<hostname>.conf` linking panel_id, hardware variant, served UI).
+
+---
+
+## Future / new panel ideas
+
+Idea-track items, not yet scheduled. They'll likely act as hardness tests for V2 and provide feature ideas for V3. When either gets scheduled, it triggers the [multi-device support](#multi-device-support-triggered-by-panel-2-actually-existing) group above.
+
+- **Panel 2: Home kiosk for light/scene control.** General-purpose home-automation surface — pick scenes, dim lights, etc.
+- **Panel 3: Desk calendar / meeting status.** Work calendar display with meeting alerts.
+
+---
+
+## Completed work (historical reference)
+
+The following phases shipped during V2 active development. Their detailed plans are kept here for archaeology — current state of each is the source of truth.
+
+### Step 17 Phase 1 — Repo restructure + artifact releases ✅ DONE
 
 **No behavior change on the Pi yet — just changes how artifacts are produced and where source lives.**
 
-### Repo moves
+#### Repo moves
 
 - `custom_components/thread_panel/` → `platform/integration/thread_panel/`
 - Add `hacs.json` at the repo root (only thing left at root that exists for HACS):
@@ -153,7 +264,7 @@ Each phase is roughly 1–2 days of work.
 
   Note: the integration source on `main` lives at `platform/integration/thread_panel/`, not `custom_components/thread_panel/`. The tag's tree satisfies HACS via a synthetic off-main release commit (see "Off-main release commit" below) — main stays clean of the duplicate.
 
-### `cut-release` extensions
+#### `cut-release` extensions
 
 Today: `yarn build` UIs, commit dist/, tag, push. After Phase 1:
 
@@ -170,7 +281,7 @@ Today: `yarn build` UIs, commit dist/, tag, push. After Phase 1:
 
 `cut-release` adopts [`gum`](https://github.com/charmbracelet/gum) (`brew install gum`) for arrow-key prompts.
 
-### Off-main release commit
+#### Off-main release commit
 
 HACS validates the GitHub tree at the release tag, expecting `custom_components/<domain>/manifest.json` (`content_in_root: false`) or `manifest.json` at repo root (`content_in_root: true`). The `HacsManifest` dataclass has no `subfolder`/`path` field — those are the only two layouts HACS supports.
 
@@ -191,7 +302,7 @@ Effects:
 
 This pattern is well-precedented (maven-release-plugin, sbt-release, etc. do variants). The one care point: cut-release must reset main back even on partial failure — the script handles this with explicit cleanup on the failure paths between commit and reset.
 
-### Pi install path (Phase 1 form)
+#### Pi install path
 
 Update `install-pi.sh` to switch from git-clone to release-artifact pull:
 
@@ -205,9 +316,7 @@ curl -L $(gh release view --json assets -q '.assets[] | select(.name=="manifest.
 # restart services
 ```
 
-Manual-update flow during Phase 1 = `ssh pi 'sudo install-pi.sh --version v2.0.0-beta.N'`. Phase 3 wraps this in HA.
-
-### HA-box install (Phase 1 form)
+#### HA-box install
 
 One-liner, documented in README:
 
@@ -220,19 +329,13 @@ curl -L "$(gh release view --json assets -q '.assets[] | select(.name|test("^thr
 
 The zip ships with files at its root (no inner `thread_panel/` wrapper), matching what HACS itself extracts into `<config>/custom_components/<domain>/`. The pre-clean (`rm -rf` + `mkdir -p`) ensures stale files from a previous install don't linger. Restart HA after. Once HACS-as-custom-repo is set up, this becomes "click update in HACS."
 
-### Validation
-
-- Cut `v2.0.0-beta.1`, verify the GitHub release page shows all five artifacts with correct sha256 in `manifest.json`.
-- Manually install integration from zip on HA box; verify it loads.
-- Manually run `install-pi.sh --version v2.0.0-beta.1` on a test Pi; verify `/opt/panel/current` is populated, services restart, kiosk comes up.
-
 ---
 
-## Phase 2 — C6 UART OTA receiver
+### Step 17 Phase 2 — C6 UART OTA receiver ✅ DONE
 
 **No new hardware. Pi can flash C6 manually via a CLI; HA integration unchanged from Phase 1.**
 
-### Wire protocol (as implemented in chunk 2a)
+#### Wire protocol
 
 Extends the line-based JSON UART protocol with one binary mode for the firmware payload. Reuses existing OTA partition setup from V1 step 13 (E1 — partition table doesn't change). Reuses ESP-IDF rollback machinery (E2 — self-validation + bootloader revert).
 
@@ -255,7 +358,7 @@ Simplifications vs. the original sketch:
 - **No baud field in `ota_ready`.** Both sides hard-code OTA_BAUD_TRANSFER=921600. If we ever want to bump it, change the constant in both places in lockstep.
 - **`ota_begin` handled even when `ha_availability == offline`.** Recovery path needs to work when HA is unreachable.
 
-### C6 firmware additions (`platform/firmware/components/panel_platform/`)
+#### C6 firmware additions (`platform/firmware/components/panel_platform/`)
 
 - `panel_ota_uart.{c,h}` — ota_begin parser, OTA partition write loop, sha256 verification (PSA Crypto — IDF v6.0 dropped the legacy `mbedtls/sha256.h` direct API in favor of PSA), baud switching, worker task.
 - `panel_uart.{c,h}` extended with raw-mode callback API (`panel_uart_set_raw_mode` / `clear`) and runtime baud-switch (`panel_uart_set_baud`). Bumped RX ring buffer from 1 KB to 4 KB for headroom at 921600.
@@ -263,7 +366,7 @@ Simplifications vs. the original sketch:
 - `panel_app.c` wires the OTA dispatcher (handled before the ha_availability gate so OTA works during HA outages), publishes `state/version` retained on each MQTT connect, and gates every UART forward through `forward_to_pi_uart()` which drops sends while OTA is active. `sensors_publish_task` early-skips its body during OTA so it doesn't contend for CPU or spam the monitor.
 - `mbedtls` added to `panel_platform/CMakeLists.txt` PRIV_REQUIRES for sha256.
 
-**Hardening discovered during chunk 2b on-device testing** (all landed in chunk 2b):
+**Hardening discovered during chunk 2b on-device testing:**
 
 - `panel_uart`'s RX ring + chunk size: previously 4 KB ring + 256-byte reads. At 921600 baud (~92 KB/s) `rx_task` couldn't sweep the ESP-IDF UART driver's ring fast enough — a single 4 KB OTA chunk arrived in ~44 ms but each rx_task wakeup drained only 256 bytes, so the ring filled and the driver dropped bytes silently before they ever reached our stream buffer. Bumped to 16 KB ring + 4 KB chunks (8 KB task stack to hold them).
 - `panel_ota_uart` stream buffer bumped from 16 KB → 64 KB to absorb worst-case `esp_ota_write` stalls (sector erase + write spikes to 100+ ms). Allocated only during the OTA window, freed on completion; 64 KB is fine on a C6 with 512 KB SRAM.
@@ -271,7 +374,7 @@ Simplifications vs. the original sketch:
 - `panel_lidar_pause()` / `panel_lidar_resume()` (new public API on `panel_lidar`): `vTaskSuspend` + `uart_disable_rx_intr` (and reverse on resume, with `uart_flush_input` to drain stale bytes before unmasking). The lidar's per-byte UART0 reads (~900 B/s) generated interrupt traffic that contributed to UART1 RX latency. Same call sites as `panel_net_pause`.
 - `panel_uart_set_baud` now no-ops when already at the target baud, suppressing duplicate "UART baud → X" log entries from the redundant `cleanup_and_release` call after the explicit set in `ota_task`.
 
-### Pi additions (`platform/bridge/`, chunk 2b)
+#### Pi additions (`platform/bridge/`)
 
 - `panel_bridge/ota.py` — `run_ota(uart, broadcast, bin_path)` reads the bin, computes sha256, drives the wire protocol via an `OtaSession` from `uart_link`. Emits `ota_status` and `ota_progress` envelopes via the broadcast hook so connected clients (and Phase 3's HA `update.panel_firmware`) can show progress.
 - `panel_bridge/uart_link.py` extended:
@@ -281,18 +384,13 @@ Simplifications vs. the original sketch:
 - `panel_bridge/__main__.py` dispatches `{"type":"ota_request","path":"…"}` from any WS client by spawning `run_ota` as a detached task. The bridge reads the bin from disk — the binary doesn't traverse WS.
 - `panel_bridge/cli/panel_flash.py` + `pyproject.toml` console script — `panel-flash [path]` connects to the bridge, sends `ota_request`, prints status + progress until complete/failed. Defaults to `/opt/panel/current/firmware.bin` and `ws://localhost:8765`.
 
-### Validation
-
-- `panel-flash /opt/panel/current/firmware.bin` on the Pi flashes the C6, reboots, version topic reports the new value.
-- Rollback: intentionally break new firmware (e.g., kill MQTT in startup before mark-valid), confirm bootloader reverts on next reset.
-
 ---
 
-## Phase 3 — HA-orchestrated update flow
+### Step 17 Phase 3 — HA-orchestrated update flow ✅ DONE
 
 Bringing it all together. HA orchestrates, bridge executes, GitHub is the source.
 
-### HA integration additions (in `platform/integration/thread_panel/`)
+#### HA integration additions (in `platform/integration/thread_panel/`)
 
 - New file: `update.py` — `PanelUpdateEntity(UpdateEntity)`:
   - `installed_version` — from C6's retained `state/version` topic
@@ -303,165 +401,141 @@ Bringing it all together. HA orchestrates, bridge executes, GitHub is the source
   - Subscribes to `state/update_status` to drive the entity's progress display
 - Config flow option: `Include prereleases` (boolean, default off). When off, latest_version filters to releases where GitHub's `prerelease: false`.
 
-### MQTT topics added (extending V1's panel-itself schema)
+#### MQTT topics added (extending V1's panel-itself schema)
 
 | Topic | Direction | Retain | Payload |
 |---|---|---|---|
 | `thread_panel/<id>/state/version` | C6 → MQTT | yes | `{"version":"v2.0.0-beta.1","build_time":"..."}` |
 | `thread_panel/<id>/cmd/update` | HA → C6 → Pi | no | `{"version":"v2.0.0"}` |
 | `thread_panel/<id>/state/update_status` | Pi → C6 → MQTT | no (high churn) | `{"phase":"flashing_c6","step":5,"of":9,"elapsed":12,"total_elapsed":34,"detail":"..."}` |
+| `thread_panel/<id>/state/wifi_state` | Pi → C6 → MQTT | yes | `{"value":"connected"}` (added in Step 17b) |
 
-`cmd/update` rides the existing UART-bridged `set/`/`cmd/` machinery with no new C6 logic beyond a topic-name addition. `state/update_status` is non-retained because it's high-churn ephemeral progress data; the integration tracks the update-in-progress in HA state.
-
-### Pi orchestration (chunk 3a, as built)
+#### Pi orchestration (chunk 3a)
 
 Lives at `/opt/panel/current/deploy/panel-update.sh`, shipped in the panel-deploy tarball with each release. Sources the new shared `install-lib.sh` for the download/install primitives so install-pi.sh and panel-update.sh share ~80 lines of bash without duplication.
 
-- Bridge subscribes to `cmd/update` via the existing UART-bridged `set/`/`cmd/` machinery (firmware adds one subscription line + one dispatch branch). On `panel_cmd update`, the new `controls/update.py` handler spawns `panel-update.sh` with `start_new_session=True` so it survives the bridge restart that happens partway through. Combined with `KillMode=process` on `panel-bridge.service`, systemd doesn't drag the script down when the bridge restarts.
-- Status reporting: panel-update.sh appends one JSON line per phase to `/opt/panel/update.status`. New `panel_bridge/update_status.py` background task (started in `__main__`) tails the file and republishes new lines as `state/update_status` panel_state envelopes through the existing pipeline.
+- Bridge subscribes to `cmd/update` via the existing UART-bridged `set/`/`cmd/` machinery. On `panel_cmd update`, the new `controls/update.py` handler spawns `panel-update.sh` with `start_new_session=True` so it survives the bridge restart that happens partway through. Combined with `KillMode=process` on `panel-bridge.service`, systemd doesn't drag the script down when the bridge restarts.
+- Status reporting: panel-update.sh appends one JSON line per phase to `/opt/panel/update.status`. `panel_bridge/update_status.py` background task tails the file and republishes new lines as `state/update_status` panel_state envelopes through the existing pipeline.
 
-Script flow (real implementation, simpler than the original sketch — no per-component sha-skip yet, the new version is always installed in full):
+Script flow (real implementation):
 
 ```
  0. PID lockfile check (refuse if previous panel-update.sh still alive)
  1. systemctl stop cog (kiosk → console)
  2. chvt 1 + setfont Lat15-TerminusBold32x16
  3. nmcli radio wifi on
- 4. getent hosts api.github.com (up to 60s)
- 5. lib_resolve_version (latest or arg → tag)
- 6. lib_download_manifest
- 7. lib_download_artifacts (sha256 verified)
- 8. lib_extract_artifacts (into /opt/panel/versions/<v>/)
- 9. lib_create_venv + pip install bridge in-place
-10. lib_swap_symlink (atomic ln -sfn + mv -T)
-11. lib_render_units (templating User=)
-12. lib_update_installed_json
-13. systemctl restart panel-bridge.service  ← bridge restarts mid-script
-14. systemctl restart panel-ui.service
-15. healthcheck (both services active for 30s)
-16. panel-flash $PANEL_ROOT/current/firmware.bin  (uses NEW bridge's panel-flash)
-17. wait 10s for C6 to reboot + reconnect
-18. lib_prune_old_versions (current + previous-1)
-19. nmcli radio wifi off
-20. trap restarts cog.service on exit (success or failure)
+ 4. Wait for wlan0:connected (60s; added Step 17b)
+ 5. getent hosts api.github.com (10s; tightened Step 17b)
+ 6. lib_resolve_version (latest or arg → tag)
+ 7. lib_download_manifest
+ 8. lib_download_artifacts (sha256 verified)
+ 9. lib_extract_artifacts (into /opt/panel/versions/<v>/)
+10. lib_create_venv + pip install bridge in-place
+11. lib_swap_symlink (atomic ln -sfn + mv -T)
+12. lib_render_units (templating User=)
+13. lib_update_installed_json
+14. systemctl restart panel-bridge.service  ← bridge restarts mid-script
+15. systemctl restart panel-ui.service
+16. healthcheck (both services active for 30s)
+17. panel-flash $PANEL_ROOT/current/firmware.bin  (uses NEW bridge's panel-flash)
+18. wait 10s for C6 to reboot + reconnect
+19. lib_prune_old_versions (current + previous-1)
+20. nmcli radio wifi off
+21. trap restarts cog.service on exit (success or failure)
 
 on healthcheck failure: roll back symlink to previous version, restart services
 on C6 flash failure: log + continue (Pi is on new version, C6 still on old — valid intermediate)
 ```
 
-Status events: `starting`, `enabling_wifi`, `waiting_for_dns`, `resolving_version`, `resolved`, `downloading_manifest`, `downloading_artifacts`, `extracting`, `creating_venv`, `swapping_symlink`, `rendering_units`, `restarting_bridge`, `restarting_ui`, `healthcheck`, `flashing_c6`, `c6_flashed` / `c6_flash_failed`, `waiting_for_c6`, `disabling_wifi`, `done`. On failure: `failed` with detail. On healthcheck rollback: `rolling_back` then `failed`.
+Status events: `starting`, `enabling_wifi`, `waiting_for_connection`, `waiting_for_dns`, `resolving_version`, `resolved`, `downloading_manifest`, `downloading_artifacts`, `extracting`, `creating_venv`, `swapping_symlink`, `rendering_units`, `restarting_bridge`, `restarting_ui`, `healthcheck`, `flashing_c6`, `c6_flashed` / `c6_flash_failed`, `verifying_c6`, `c6_verified`, `disabling_wifi`, `done`, `rebooting`. On failure: `failed` with detail. On healthcheck rollback: `rolling_back` then `failed`.
 
-### Console update display (chunk 3a, as built)
+#### Console update display (chunk 3a)
 
 Added to `install-pi.sh`'s bootstrap-only setup phase, idempotent:
 
-- Append `fbcon=rotate:3` to `/boot/firmware/cmdline.txt` if not already present — rotates the kernel framebuffer console independently of the KMS display driver. (V1 lessons confirm `video=...rotate=N` does NOT work on Bookworm's vc4-kms-v3d; `fbcon=rotate:N` is a different mechanism that does.)
+- Append `fbcon=rotate:3` to `/boot/firmware/cmdline.txt` if not already present — rotates the kernel framebuffer console independently of the KMS display driver.
 - `apt install console-setup` if not already installed — pulls in Terminus fonts including `Lat15-TerminusBold32x16` (~32px tall, double-wide, legible on the small panel from across the room).
-- Writes `/etc/sudoers.d/panel-bridge` with the entries panel-update.sh needs (nmcli, systemctl restart of specific units, chvt, setfont, plus the existing V1 entries for shutdown / wifi).
+- Writes `/etc/sudoers.d/panel-bridge` with the entries panel-update.sh needs.
 
 `panel-update.sh` uses `sudo setfont Lat15-TerminusBold32x16` at the start. The font reverts on the next sway start (cog regains the framebuffer).
 
-Console output format (chunk 3a — kept simple, no spinner / timer for now):
-
-```
-[starting] v2.0.0-beta.4
-[enabling_wifi]
-[waiting_for_dns]
-[resolving_version] v2.0.0-beta.4
-[resolved] v2.0.0-beta.4
-[downloading_manifest]
-[downloading_artifacts]
-[extracting]
-[creating_venv]
-[swapping_symlink]
-[rendering_units]
-[restarting_bridge]
-[restarting_ui]
-[healthcheck]
-[flashing_c6]
-[c6_flashed]
-[waiting_for_c6]
-[disabling_wifi]
-[done] v2.0.0-beta.4
-```
-
-Phases scroll bottom-up at the giant Terminus font size — readable across the room. Future polish: spinner + timer + completed-step checklist overlay (defer to V2 polish if/when needed).
-
-### Repo identity (chunk 3a)
+#### Repo identity
 
 Avoids hardcoded `chaddugas/thread_control_panel` strings in source. cut-release substitutes `__REPO__` placeholder at release-build time using `git remote get-url origin`. Touched at substitution time:
 
 - `platform/deploy/install-pi.sh` — loose top-level artifact
 - `platform/deploy/panel-update.sh` — in deploy tarball
-- (Phase 3b will add `platform/integration/thread_panel/update.py`)
+- `platform/integration/thread_panel/update.py`
 
 For local testing without cut-release, both scripts honor `REPO=foo/bar` env var override.
 
-### Pi-side validation (chunk 3a, manual via mosquitto_pub)
+#### Phase 3a validation result
 
-```
-mosquitto_pub -h <broker> -p 8883 -u mqtt_user -P "$PASS" --cafile <ca> \
-  -t 'thread_panel/feeding_control/cmd/update' \
-  -m '{"version":"v2.0.0-betaN","keep_wifi_on":true}'
-```
+Full HA-triggered OTA round-trip (cmd/update → script → C6 reboot into new firmware → state/version reports new version → no manual intervention) **verified end-to-end** through v2.0.0-beta.11 with the panel screen showing live phase status the entire time. Two originally-blocking bugs (success-path `esp_restart()` blocked by fresh esp-mqtt TLS handshake, and `/dev/tty1` permissions reverting after `cog stop`) were fixed and validated by real OTAs.
 
-Watch the panel screen flip to console + scroll status; subscribe to `state/update_status` to see HA-side events:
+#### Phase 3b validation result
 
-```
-mosquitto_sub -h <broker> -p 8883 -u mqtt_user -P "$PASS" --cafile <ca> \
-  -t 'thread_panel/feeding_control/state/update_status' -v
-```
+`PanelUpdateEntity` shipped through betas 13–25 with the following blocking issues all resolved:
 
-### ~~Chunk 3a~~ ✅ DONE (validated end-to-end through v2.0.0-beta.11)
-
-Full HA-triggered OTA round-trip (cmd/update → script → C6 reboot into new firmware → state/version reports new version → no manual intervention) **verified end-to-end** with the panel screen showing live phase status the entire time. Both originally-blocking bugs from beta.9 are now fixed and validated by real OTAs:
-
-- **beta.10 OTA** validated bug 1 — C6 auto-rebooted into the new firmware ~6s after `panel-flash` completed, no manual `cmd/reboot_c6` needed. (Pi-side script that ran was still beta.9's; bug 2 fix wasn't exercised yet.)
-- **beta.11 OTA** validated bug 2 — Pi-side script was now beta.10 (with chown + `[ -t 1 ]`), and the panel screen showed the giant rotated phase scroll throughout the run.
-
-**What works:**
-
-- ✅ `cmd/update` flows HA → MQTT → C6 → UART → bridge → spawned `panel-update.sh`
-- ✅ Same-version refusal early in the script (no console takeover for redundant requests)
-- ✅ `keep_wifi_on` env var passed via cmd/update payload, honored by the script (SSH session survives)
-- ✅ All install-lib.sh phases run successfully on the Pi: download artifacts (sha-verified) → extract → create venv → swap symlink → render units → restart services → healthcheck
-- ✅ panel-flash flashes the C6 OTA partition via UART, sha verifies, `esp_ota_set_boot_partition` succeeds
-- ✅ Status reporting via `/opt/panel/update.status` works; bridge tails it and republishes as `state/update_status`
-- ✅ `verify-c6-version.py` correctly waits for the new version via the bridge WS feed (the state.py cache fix was needed for this — `panel_state` was previously keyed by type-only and version got overwritten)
-- ✅ When the C6 actually boots the new firmware, `state/version` updates and verify succeeds within seconds
-- ✅ Once the C6 is running new firmware, `panel_app_on_connected` calls `esp_ota_mark_app_valid_cancel_rollback` so the new version persists across reboots
-
-**Bugs that were blocking end-to-end success (now fixed in beta.10):**
-
-1. **`esp_restart()` didn't fire after OTA on the success path.** `cleanup_and_release()` called `panel_net_resume()` → `esp_mqtt_client_start()`, which registers shutdown handlers + spawns MQTT tasks doing TLS handshake. `esp_restart()` runs registered shutdown handlers, and the in-progress TLS handshake blocked them. Chip kept running on the OLD firmware even though `esp_ota_set_boot_partition` succeeded.
-   - **Fix in `panel_ota_uart.c` (beta.9):** success path skips `cleanup_and_release()` and goes straight to a 1s drain + `esp_restart()`. Failure paths still call cleanup. Comment in the source explains why explicitly.
-   - **State as of beta.10 cut:** C6 is verified running beta.9 (retained `state/version` reports `v2.0.0-beta.9` over MQTT). The fix is live on the chip. The next OTA (→ beta.10) is its first end-to-end validation.
-
-2. **Console takeover failed silently — `pi`/install-user could not write to `/dev/tty1`.** While cog runs, PAM (`PAMName=login`) chowns `/dev/tty1` to the kiosk user; on `systemctl stop cog.service` it reverts to `root:tty 600` — and the `tty` group has no permissions either, so being in `tty` group wouldn't have helped. With `set -u` only (no `set -e`), bash silently continues past a failed `exec >` redirect, so every `publish_status` echo went to the bridge-spawned DEVNULL stdout. The "blank screen" and "blinking cursor" symptoms across beta.4–beta.9 were all this. `setterm --blank 0 --powerdown 0` (added in beta.9) was a wrong-tree fix — blanking was never the issue.
-   - **Fix in `panel-update.sh` (beta.10):** `sudo chown "$USER" /dev/tty1` between `chvt 1` and `exec > /dev/tty1 2>&1`. Plus a defensive `[ -t 1 ]` check after the exec — if stdout still isn't a tty, append `console_takeover_failed` to update.status so this exact failure mode is visible next time instead of mysteriously absent. `install-pi.sh` adds the matching `chown $USER /dev/tty1` sudoers entry to its drop-in for cleanliness on fresh installs (existing Pis with the wide-open Pi-imager NOPASSWD:ALL drop-in don't need it for the chown to succeed, but tightening the dependency to a single targeted entry is the right architectural shape).
-   - **Verified pre-cut:** ran the takeover sequence as a standalone script on the Pi. `[ -t 1 ]` returned true post-exec (no failure log written), `setfont` + scrolled phase lines rendered visibly on the panel screen at the giant rotated Terminus font.
-
-**Workarounds previously in use (no longer needed after beta.10 ships):**
-
-- ~~Manual `cmd/reboot_c6` after each OTA — replaced by bug-1 fix.~~
-- ~~`cat /opt/panel/update.status` from SSH for visibility — replaced by bug-2 fix.~~
-- `keep_wifi_on=true` stays as a deliberate dev-iteration aid; not a workaround, just the way to keep an SSH session alive during testing.
-
-**Validation milestone — open going into beta.10:**
-
-- Single full HA-triggered OTA (cmd/update → script runs → C6 reboots into new firmware → state/version reports new version → no manual intervention) has not yet been observed end-to-end. beta.10 → beta.10+1 is the first time both fixes get exercised together by the same flow.
-
-### Phase 3b — HA-side `update.PanelUpdateEntity` + post-update polish
-
-Open work for the next chunk:
-
-- **`update.py` in `platform/integration/thread_panel/`**, per the spec at the top of Phase 3 (PanelUpdateEntity reading `state/version` for installed, GitHub Releases API for latest, publishing `cmd/update` on install, subscribing to `state/update_status` for progress). Plus the `Include prereleases` config-flow option.
-- **End-to-end validation**: trigger an OTA from HA's update entity (not mosquitto_pub), watch the entity's progress UI render the phases coming over `state/update_status`, confirm the entity flips to "up to date" when the C6 reports the new version. This is the validation milestone for chunk 3b.
-- **Auto-reboot the Pi at end of successful OTA.** Currently the trap in `panel-update.sh` restarts cog, which combined with panel-ui-server's `Cache-Control: no-cache` on index.html should refresh the UI bundle. But WPE-WebKit's cache has a track record of holding stale content (see [panel-ui-server.py:5-15](../platform/deploy/panel-ui-server.py#L5-L15)) and `localStorage` / cookies persist across cog restarts regardless. A `sudo reboot` after the `done` publish makes the new install fully fresh — closes the gap with ~30–45s extra "panel offline" after `state/version` already reports the new version (so HA's entity already shows success). Failure paths must NOT reboot — keep the rollback flow as-is so the user can SSH in and inspect.
+1. ✅ FIXED in beta.18 — OptionsFlow ordering bug. Replaced manual reload with `entry.add_update_listener(_async_reload_on_change)` so the framework triggers reload on options changes.
+2. HACS state caching across `content_in_root` flips — HACS bug; workaround is delete + re-add the custom repo.
+3. ✅ FIXED in beta.19 — Doubled-path `custom_components/thread_panel/thread_panel/`. `git reset --hard` doesn't remove now-untracked empty dirs; added `rm -rf custom_components` pre-clean before the cp.
+4. ✅ FIXED in beta.19 — HACS doesn't substitute `{version}` in hacs.json's filename. Filename is now static `thread_panel.zip`.
+5. ✅ FIXED in beta.20 — Most-recent release wasn't actually most-recent. GitHub's `/releases` endpoint sorts by tag name (lex desc), not chronological. update.py now sorts by `created_at` itself before picking.
+6. ✅ FIXED in beta.21 — "Unknown error" alert on the entity panel. Cause: `RELEASE_NOTES` feature declared without overriding `async_release_notes`. Override added.
+7. ✅ FIXED in beta.22 — `update_percentage` not rendering progress bar. Added `UpdateEntityFeature.PROGRESS` + `PHASE_PERCENTAGES` map driven from `state/update_status`.
+8. ✅ FIXED in beta.22 — Ghost installs from retained `state/update_status` at HA startup. Cause: panel_app.c publishes all panel_state envelopes with retain=1; on HA restart the broker replays the last terminal phase. Fix: `_on_update_status_message` ignores retained messages. Architectural debt logged: firmware should distinguish event-stream vs state topics — captured in [Robustness & correctness](#robustness--correctness) for later.
+9. ✅ FIXED in beta.23-25 — Various OTA polish items: post-`done` version-match hold (in_progress stays True until `state/version` reports the target); flip `in_progress=True` before awaiting MQTT publish (button disables immediately on click); aiohttp `ClientTimeout` typing fix.
 
 ---
 
-## Versioning scheme
+### Step 17b — WiFi state surface and observability ✅ DONE
+
+Sibling to Step 17. Promoted out of backlog mid-V2 because (a) the OTA flow's `enabling_wifi → waiting_for_dns` step is one of the slow phases users see and we don't have visibility into where the time goes, and (b) the bridge's WiFi entity surface was unreliable enough that observed state could lie ("connected to main network" while SSH times out, stays "connected" minutes after toggling off, etc.).
+
+#### Motivation (observed 2026-04-30)
+
+Symptoms that drove this step:
+
+- Network entity reported "connected to main network" while SSH timed out — entity claimed connectivity that didn't exist at IP layer.
+- Toggle WiFi switch OFF → entity stayed at "main network" for several minutes before flipping to "Unknown".
+- Toggle WiFi switch ON → 4+ minutes later, switch entity still reported off, scan-for-networks button produced no visible networks.
+- `wifi_error` entity has been at "Unknown" since added — never reported a real value.
+- Network select entity shows last-user-selected network, not currently-connected SSID.
+- OTA's `enabling_wifi → waiting_for_dns` lumps connection-up time (scan + auth + DHCP, ~50-60s) into the DNS-resolution phase, so the user can't tell what's actually slow.
+- Pi journals are tmpfs by default; reboots and power cycles lose all bridge logs from the prior boot, making post-mortem debugging hard.
+
+#### Plan (commit-by-commit) — all DONE
+
+**~~Commit A — Persistent journals + structured-event logger helper.~~** ✅ DONE. Configures `Storage=persistent` in `journald.conf` via `install-pi.sh` (creates `/var/log/journal/`, sets retention caps, restarts journald). Adds `panel_bridge/events.py` with `log_event(logger, name, **fields)` emitting `event=<name> k=v` lines greppable via `journalctl --grep`. Zero new dependencies — traded clean structured fields for greppability.
+
+**~~Commit B — `nmcli` timeouts.~~** ✅ DONE. New `controls/nmcli_util.py` centralizes subprocess execution that previously lived inline in wifi.py + privately in wifi_manage.py; default 30s `asyncio.wait_for` ceiling on every call. On timeout, kills the subprocess, emits `nmcli_timeout` structured event, and returns rc=124 (GNU `timeout` convention) so callers handle it as a normal failure. Verified `nmcli_timeout` count = 0 in steady-state validation.
+
+**~~Commit C — Live connection state + on-toggle full refresh.~~** ✅ DONE. `_current_ssid` now queries `nmcli -t -f GENERAL.STATE,GENERAL.CONNECTION device show wlan0` and only returns a name when GENERAL.STATE starts with "100" (NM's `ACTIVATED`). `apply_wifi_enabled` calls a new public `wifi_manage.refresh_state(bridge)` after toggling, so SSID + scan + error all update immediately rather than waiting for the next periodic tick.
+
+**~~Commit D — Event-driven updates via `nmcli monitor` + `wifi_state` enum.~~** ✅ DONE. New `controls/wifi_state.py` runs `nmcli monitor` as a long-lived background task (each line is a generic edge trigger to re-read state); publishes a single `state/wifi_state` topic carrying one of disabled/disconnected/connecting/connected/error. Reconcile loop at 60s is the safety net.
+
+**~~Commit E — Split `enabling_wifi → waiting_for_connection → waiting_for_dns` in panel-update.sh.~~** ✅ DONE. New `waiting_for_connection` phase polls `nmcli -t -f DEVICE,STATE device status` for `wlan0:connected` (60s timeout); `waiting_for_dns` is now a tight 10s DNS-only check post-connection. Real-world observation: NM connection-up can take ~63s on this panel — bumping to 120s captured in [Quality of life](#quality-of-life-small-fixes--polish).
+
+**~~Commit F — Tighten periodic loop to 10s.~~** ✅ DONE. `wifi_manage.SCAN_INTERVAL_S` 30s → 10s. Safe to tighten now that timeouts protect against hangs and event-driven updates carry the live state path.
+
+**~~Commit G — HA integration entity polish for "Disconnected" surface.~~** ✅ DONE. New `PanelWifiStateSensor` (SensorDeviceClass.ENUM, options Disabled/Disconnected/Connecting/Connected/Error) subscribes to `state/wifi_state`; `PanelWifiSsidSensor` shows "Disconnected" instead of None when SSID is empty; `PanelWifiErrorSensor` shows "No error" instead of None when empty.
+
+#### Success criteria (validated through v2.0.0-beta.25–28 — initial cut + a series of no-op cuts to exercise the new panel-update.sh on a second OTA, per the spawn-at-request-time gotcha)
+
+1. ✅ WiFi switch entity flips state within ~1s of any nmcli-side change. Journal shows `wifi_state_change` events arriving sub-second after `wifi_action`.
+2. ✅ SSID entity reflects actual connection state — toggling off transitions `connected → disabled` within 200ms in the journal.
+3. ✅ `wifi_state` enum queryable in HA, walks through Disabled → Disconnected → Connecting → Connected on toggle.
+4. ✅ Entities surface "Disconnected"/"No error" not "Unknown" when WiFi is disabled.
+5. ✅ OTA's `waiting_for_connection` phase visible in HA's progress bar (validated via no-op beta cut + second OTA per the spawn-at-request-time gotcha).
+6. ✅ Persistent journals landing on disk (`/var/log/journal/<machine-id>/system.journal`).
+7. ✅ Structured WiFi events flow as expected: `journalctl --grep 'event='` shows `wifi_action` + `wifi_state_change` lines with the source module preserved, fields unambiguous.
+
+---
+
+## Reference
+
+### Versioning scheme
 
 Standard semver including prerelease syntax: `v<MAJOR>.<MINOR>.<PATCH>` for stable, `v<MAJOR>.<MINOR>.<PATCH>-<tag>.<N>` for prereleases. Tags: `alpha`, `beta`, `rc` per software-release-engineering convention.
 
@@ -509,13 +583,9 @@ Bump:
 
 Convention chosen over a two-stage flow (release-type then bump) because it matches `npm version` / `cargo` muscle memory and avoids forcing a stable-vs-pre decision before deciding the bump magnitude.
 
-For the immediate path: cut V2 work as `v2.0.0-beta.1` → iterate as `v2.0.0-beta.N` → promote to `v2.0.0` when stable. Any V1 patches (unlikely but possible) cut from a separate branch as `v1.4.x`.
+### File changes summary (snapshot through Step 17b)
 
----
-
-## File changes summary
-
-### Created
+#### Created
 
 | Path | Purpose |
 |---|---|
@@ -526,16 +596,18 @@ For the immediate path: cut V2 work as `v2.0.0-beta.1` → iterate as `v2.0.0-be
 | `platform/firmware/components/panel_platform/panel_version.h` | Generated at build time from `git describe` |
 | `platform/bridge/panel_bridge/ota.py` | Pi-side firmware-over-UART sender |
 | `platform/bridge/panel_bridge/cli/panel_flash.py` | Manual flash CLI |
+| `platform/bridge/panel_bridge/events.py` | Structured-event logger helper (Step 17b) |
+| `platform/bridge/panel_bridge/controls/nmcli_util.py` | Shared nmcli runner with timeout (Step 17b) |
+| `platform/bridge/panel_bridge/controls/wifi_state.py` | wifi_state enum + nmcli monitor task (Step 17b) |
 | `platform/deploy/panel-update.sh` | Orchestration script |
-| `platform/deploy/console-display.sh` | Helper: tty1 progress UI primitives (writeline, mark-done, etc.) |
 | `docs/build_plan_v2.md` | This document |
 
-### Modified
+#### Modified
 
 | Path | Change |
 |---|---|
 | `tools/cut-release.zsh` | Add interactive bump prompt (gum), firmware build, tarballing, zip, manifest.json, gh release create with --prerelease flag |
-| `platform/deploy/install-pi.sh` | Switch from git-clone to release-artifact pull; add `fbcon=rotate:3` + console-setup; render systemd units pointing at `/opt/panel/current/` |
+| `platform/deploy/install-pi.sh` | Switch from git-clone to release-artifact pull; add `fbcon=rotate:3` + console-setup; render systemd units pointing at `/opt/panel/current/`; configure persistent journald (Step 17b) |
 | `platform/deploy/panel-bridge.service` | `ExecStart=/opt/panel/current/bridge/...` |
 | `platform/deploy/panel-ui.service` | Root at `/opt/panel/current/ui-dist/` |
 | `platform/firmware/components/panel_platform/panel_app.c` | Wire ota_uart handler; publish state/version on connect |
@@ -543,17 +615,15 @@ For the immediate path: cut V2 work as `v2.0.0-beta.1` → iterate as `v2.0.0-be
 | `README.md` | Document new install paths (Pi + HA box) from release artifacts |
 | `CLAUDE.md` | Reference both build_plan docs; note V2 is active work |
 
-### Removed (during Phase 1, with care)
+#### Removed (during Phase 1)
 
 | Path | Why |
 |---|---|
 | `custom_components/thread_panel/` | Moved to `platform/integration/thread_panel/` |
 | `panels/feeding_control/ui/dist/` | Built artifacts now in releases, not git |
-| (eventually) `tools/panel-ota` | Mac-side Thread-OTA tool, superseded — leave during Phase 1+2 as fallback, remove during Phase 4 once V2 path is proven on hardware |
+| `.github/workflows/validate.yml` | HACS validation that always failed on main (per off-main commit pattern) — removed in beta.23 |
 
----
-
-## Resolved decisions (from planning conversation)
+### Resolved decisions
 
 1. **Where does `cut-release` run?** Mac. CI is V3.
 2. **Auto-install vs. manual?** Manual only. HA polls GitHub releases hourly, surfaces "update available" via the entity, user clicks Install. Scheduled auto-install removed from scope.
@@ -564,204 +634,14 @@ For the immediate path: cut V2 work as `v2.0.0-beta.1` → iterate as `v2.0.0-be
 7. **Console display approach.** tty1 takeover with `fbcon=rotate:3` + `setfont Lat15-TerminusBold32x16`, not a web UI overlay. Doesn't depend on the kiosk being healthy (which matters precisely when you're updating to fix it).
 8. **Beta versioning scheme.** Standard semver prereleases (`-beta.N`), npm-style flat bump menu in cut-release, integration toggle for `Include prereleases`.
 
-## Open questions (to answer during build)
+### Open questions
 
-- Healthcheck thresholds in `panel-update.sh` step 11. "Bridge active for 30s" is a starting point — may need tuning. Same for "C6 reconnect within N seconds after flash." Set conservative defaults, log actuals during test releases, tune from data.
+- Healthcheck thresholds in `panel-update.sh`. "Bridge active for 30s" is a starting point — may need tuning. Same for "C6 reconnect within N seconds after flash." Set conservative defaults, log actuals during test releases, tune from data.
 - Concurrent-update protection. If `cmd/update` arrives while one is in flight, what happens? Probably: write a `/var/run/panel-update.pid` lockfile in step 1, refuse to start if it exists, publish `state/update_status: rejected, detail: in_progress`. Keep simple.
 - `panel-update.sh` log retention. Each run should write a full log to `/var/log/panel-update/<timestamp>.log` for post-mortem. Retention policy TBD (keep last 10? last 30 days?). Easy to add later.
 - Whether to include the bridge tarball *in* the bridge's own version directory (so the source-of-truth tarball is preserved on disk) or just unpack-and-discard. Probably preserve — useful for debugging "did I actually install what I think I installed."
 
 ---
-
-## Step 17b — WiFi state surface and observability
-
-Sibling to Step 17. Promoted out of backlog mid-V2 because (a) the OTA flow's `enabling_wifi → waiting_for_dns` step is one of the slow phases users see and we don't have visibility into where the time goes, and (b) the bridge's WiFi entity surface is unreliable enough that observed state can lie ("connected to main network" while SSH times out, stays "connected" minutes after toggling off, etc.). Tied to Step 17 because OTA correctness depends on WiFi correctness; tied to broader V2 because we need post-mortem-able logs across reboots.
-
-### Motivation (observed 2026-04-30)
-
-Symptoms that drove this step:
-
-- Network entity reported "connected to main network" while SSH timed out — entity claimed connectivity that didn't exist at IP layer.
-- Toggle WiFi switch OFF → entity stayed at "main network" for several minutes before flipping to "Unknown".
-- Toggle WiFi switch ON → 4+ minutes later, switch entity still reported off, scan-for-networks button produced no visible networks.
-- `wifi_error` entity has been at "Unknown" since added — never reported a real value.
-- Network select entity shows last-user-selected network, not currently-connected SSID.
-- OTA's `enabling_wifi → waiting_for_dns` lumps connection-up time (scan + auth + DHCP, ~50-60s) into the DNS-resolution phase, so the user can't tell what's actually slow.
-- Pi journals are tmpfs by default; reboots and power cycles lose all bridge logs from the prior boot, making post-mortem debugging hard.
-
-### Root causes (from code review)
-
-In [wifi.py](../platform/bridge/panel_bridge/controls/wifi.py) and [wifi_manage.py](../platform/bridge/panel_bridge/controls/wifi_manage.py):
-
-1. `_run_nmcli` has no timeout. If `nmcli` itself hangs (which can happen when NM is in a bad state), the periodic loop blocks indefinitely, freezing all WiFi state updates.
-2. `apply_wifi_enabled` (radio toggle) only re-reads radio state after toggle; SSID + scan + error stay stale until the next 30s periodic loop tick.
-3. `_current_ssid` reads `nmcli device wifi list` cached scan list and finds `IN-USE=*`. NM keeps the IN-USE flag set on the last AP even when the connection has effectively dropped at IP layer — so we report "connected" based on a stale cache rather than NM's actual connection state.
-4. State updates are 100% poll-driven on a 30s cadence; no event subscription to NM, no on-demand re-poll on user-visible actions.
-5. No single source of truth for "what's the WiFi doing right now" — UX surfaces (switch / SSID / error) infer state independently from disjoint nmcli reads.
-
-In [panel-update.sh:176-190](../platform/deploy/panel-update.sh#L176-L190):
-
-6. `nmcli radio wifi on` returns instantly (radio bit only); the actual connection sequence (scan + auth + DHCP) happens implicitly inside the `waiting_for_dns` polling loop, hidden from progress reporting.
-
-In Pi system config:
-
-7. `journalctl -b -2` returns nothing because journals live in `/run/log/journal/` (tmpfs, wiped on reboot). Persistent journal storage is one config line away.
-
-### Plan (commit-by-commit)
-
-Each commit is independently revertable. Numbered to match the original 8-item proposal.
-
-**Commit A — Persistent journals + structured-event logger helper.** Foundation for everything that follows. Configures `Storage=persistent` in `journald.conf` via `install-pi.sh` (creates `/var/log/journal/`, sets retention caps, restarts journald). Adds a small helper in `panel_bridge/events.py` (or similar) that wraps `logging.LoggerAdapter` to attach `extra={"event": "<name>", **fields}` so structured events can be queried via `journalctl --output=json`. Defines a starter set of event names: `wifi_state_change`, `wifi_action`, `nmcli_timeout`, `mqtt_reconnect`, `ota_phase`. No behavior change yet — just infrastructure.
-
-**Commit B — `nmcli` timeouts (item 1).** Wrap every `_run_nmcli` invocation with `asyncio.wait_for(..., timeout=10)`. On timeout, log a structured `nmcli_timeout` event with the args and propagate as a non-zero return so callers handle it as a normal nmcli failure. Defensive; explains the "minutes-stuck" symptom and makes the periodic loop unkillable by a hung subprocess.
-
-**Commit C — Live connection state + on-toggle full refresh (items 2 + 3).** Replace `_current_ssid`'s scan-cache read with a query that reads NM's actual connection state (`nmcli -t -f GENERAL.STATE,GENERAL.CONNECTION device show wlan0` or the equivalent D-Bus call). Update `apply_wifi_enabled` to trigger a full state refresh (radio + SSID + scan + error) after the toggle, not just a radio re-read. Direct fix for the "stays connected after toggle off" and "claims connected while not actually" symptoms.
-
-**Commit D — Event-driven updates via `nmcli monitor` + `wifi_state` enum (items 6 + 7).** Spawn `nmcli -t monitor` (or a D-Bus subscription) as a background task. Each line/event triggers a state refresh. Introduce a single `wifi_state` enum topic carrying one of `disabled` / `disconnected` / `connecting` / `connected` / `error`, derived from NM's state at every refresh. Periodic loop becomes a reconcile-only safety net at a longer interval (60s). Prerequisite for D's structural value: simplifies what HA's entities consume.
-
-**Commit E — Split `enabling_wifi → waiting_for_connection → waiting_for_dns` in panel-update.sh (item 4).** New phase `waiting_for_connection` polls `nmcli -t -f STATE general status` until "connected" or 60s timeout. `waiting_for_dns` becomes a tight 15s DNS-only check that runs after connection confirmed. Update `PHASE_PERCENTAGES` in [update.py](../platform/integration/thread_panel/update.py) to give the new phase a slot. Visible progress through the slow part; tighter per-stage timeouts.
-
-**Commit F — Tighten periodic loop to 10s (item 5).** Cheap once event-driven updates carry the load and timeouts protect against hangs. Keeps reconcile fast without overwhelming nmcli.
-
-**Commit G — HA integration entity polish for "Disconnected" surface (item 8).** Update the relevant entity classes in [platform/integration/thread_panel/](../platform/integration/thread_panel/) so that when `wifi_state == disabled` (or `wifi_enabled == False`), the SSID select and error text entities surface "Disconnected" or "Off" rather than "Unknown". Use the new `wifi_state` enum from Commit D as the discriminator. Possibly also remove `wifi_error` if it's still permanently-Unknown after Commit C — defer that decision until we see Commit C's behavior.
-
-### Success criteria
-
-After all commits ship in a beta:
-
-1. WiFi switch entity flips state within ~1s of any nmcli-side change (event-driven).
-2. SSID entity reflects actual connection state, never lying about IP-layer reachability — toggling off updates within 1s.
-3. `wifi_state` enum is queryable in HA and shows the right value at all times.
-4. Entities surface "Disconnected"/"Off" not "Unknown" when WiFi is disabled.
-5. OTA's `waiting_for_connection` phase is visible in HA's progress bar; `waiting_for_dns` resolves in <2s once connection is up.
-6. After a reboot, `journalctl -b -1 -u panel-bridge.service` returns the prior boot's logs.
-7. `journalctl --output=json _COMM=panel-bridge | jq 'select(.event=="wifi_state_change")'` returns a clean stream of structured WiFi events.
-
-### Diagnostic capture commands (use during validation)
-
-```bash
-# Per-phase OTA timestamps from the most recent run
-cat /opt/panel/update.status
-
-# Bridge logs current boot
-journalctl -b -u panel-bridge.service --no-pager
-# ...prior boot (after Commit A makes journals persistent)
-journalctl -b -1 -u panel-bridge.service --no-pager
-
-# NetworkManager events
-journalctl -b -u NetworkManager --no-pager
-
-# Live state (single source of truth from NM)
-nmcli -t -f STATE,CONNECTION,DEVICE general status
-
-# Structured events as JSON
-journalctl _COMM=panel-bridge --output=json --no-pager
-```
-
----
-
-# Backlog: additional V2 work (promoted from V1)
-
-The items below were collected during V1 build under "V2 / Post-V1 follow-ups" + "Outstanding (V2)" in [build_plan_v1.md](build_plan_v1.md). They're organized into Steps 18–22 by **user story** — what someone is trying to do when they care about each step:
-
-| Step | Theme | Story |
-|---|---|---|
-| 18 | First-install & developer ergonomics | "I have a fresh Pi (or a fresh Mac dev box); how easy is it to get going?" |
-| 19 | HA integration UX | "I'm using HA and configuring/tuning my panel from there." |
-| 20 | Multi-device / fleet readiness | "I want a second panel (or a different product) without manual copy-paste fragility." |
-| 21 | Single-device robustness | "The one panel I have should keep working under edge cases." |
-| 22 | Hardware affordances | "Things that depend on the panel hardware itself." |
-| 23 | Per-component release cadence | "I want to ship integration changes without recutting firmware (and vice versa)." |
-
-Steps are independent — pick whichever fits the current motivation. Items inside each step often share scaffolding so they're worth scoping together when you start the step.
-
-A few items from the V1 list have been dropped or rolled into Step 17:
-
-- ~~"GitHub Action / artifact-based deploy instead of full repo clone"~~ — promoted to Step 17 Phase 1.
-- ~~"HACS distribution of `thread_panel` integration"~~ — explicit V2 non-goal (project is too hardware-specific for the default store; HACS-as-custom-repo stays available via Step 17's `hacs.json`).
-- ~~"MQTT credentials in sdkconfig (plaintext)"~~ from Outstanding tech debt — consolidated into Step 20's NVS provisioning item; same root issue.
-
-## Step 18 — First-install & developer ergonomics
-
-The "I'm setting up a fresh Pi" and "I'm a developer touching the repo" stories. Almost everything here lands in or around `install-pi.sh` and shell tooling.
-
-- **`install-pi.sh` full bootstrap from a fresh Pi OS Lite.** Today the script assumes the user has already cloned the repo, set up the bridge venv, and apt-installed cog. Fold all of that in so a brand-new Pi can be brought up with one command. While we're there, fold in the steps from earlier V1 build phases that still live as prose in [build_plan_v1.md](build_plan_v1.md): `dtoverlay=disable-bt` for PL011 on GPIO 14/15 (V1 step 4), serial-console disable, NetworkManager bring-up, and any other one-time setup. End state: image SD → boot → ssh in → run script → reboot → kiosk runs. Device-agnostic to whatever extent is possible.
-- **Kiosk-renderer choice via flag.** `install-pi.sh --cog` (Pi Zero 2 W, 512 MB) vs `install-pi.sh --cage` (Pi 4+, 1 GB+) so the same script works across hardware. Default to cog on detected ≤768 MB, cage on more. Either path apt-installs the right packages and renders the matching systemd unit. Layers on top of the bootstrap-overhaul item above.
-- **WPE bubblewrap sandbox proper fix.** `cog.service` currently sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` to bypass Debian's misconfigured bubblewrap. The real fix is `setcap -r /usr/bin/bwrap` (let bwrap fall back to unprivileged userns) plus a check in `install-pi.sh` to re-apply after apt updates of `bubblewrap` clobber the caps. Low security priority (sandbox is mostly defense against malicious sites we don't load), but cleaner. Lands inside the bootstrap-overhaul item naturally.
-- **Direnv + shell helper cleanup.** Several issues with the current `.envrc` / source aliases (interactive `panel-bridge`, `idf` activation, etc.) — paths, ordering, environment leaks. Audit and fix in one pass. (User knows the specifics; revisit when we get there.) Mac-side, independent of the install-pi.sh items.
-  - **Specific bug to fix here: `cut-release` is a sourced zsh function whose definition lives in the interactive shell's memory after the first `source tools/cut-release.zsh`. Subsequent edits to the file don't auto-reload — you keep getting the old function until you re-source. This bit us in beta.15: edited cut-release on disk to add the off-main HACS-layout commit logic, ran `cut-release`, and the OLD in-memory definition fired (no off-main commit, tag landed at the version-bump commit, HACS install failed). Fix options: (a) auto-source via direnv on .envrc reload, (b) detect file-mtime > load-time at function entry and warn, (c) wrap as a binary on PATH instead of a sourced function. Pick whichever lands cleanly with the rest of the helper cleanup.**
-
-## Step 19 — HA integration UX
-
-The "I'm using HA to configure or tune my panel" story. All of these touch the `thread_panel` integration and/or HA-side configuration shape.
-
-- **Replace YAML-paste manifest with a real config flow.** Today the integration's manifest lives in `panels/<id>/ha/manifest.yaml` and gets pasted into the config flow as text. Move to an interactive picker — list installed devices, let the user multi-select entities and per-entity attribute allowlists, store as proper `ConfigEntry.options`. YAML stays as a power-user import path but isn't the default. Coordinate the new options shape so it's forward-compatible with the `update` entity options that Step 17 added.
-- **"Unconfigured panel" splash in `platform/ui-core`.** When a panel boots without a product UI configured (`panel-ui.service` serving an empty/missing dist/, or no panel selected), show a friendly splash with setup instructions instead of a directory listing or blank screen. The splash itself ships as part of ui-core so every panel inherits it for free. Closes the loop with the config-flow item above: when you haven't set the panel up in HA yet, the splash tells you what to do.
-- **Configurable presence/theme thresholds via HA, not `.env.production`.** Today the splash distance, theme switch points, etc. are baked into the bundle at build time. For tuning on-site without a rebuild, expose them as HA `number` entities the bridge subscribes to and the UI reads from `panel.entity()`. Tune without rebuilding; multi-device benefit is each Pi has its own settings synced through HA.
-
-## Step 20 — Multi-device / fleet readiness
-
-The "I want a second panel (or a different product), without copy-paste fragility" story. Everything here is gated by needing the project to *actually* support more than one device — none of it is urgent for a single-panel deployment, but they're tightly coupled when you do tackle it. Recommend doing all four together rather than piecemeal.
-
-- **NVS-provisioned per-device MQTT credentials + per-device Mosquitto ACLs.** Currently every device built from this tree shares the credentials baked into `sdkconfig`. Fine for one device. Before scaling to a fleet, switch to a provisioning flow that writes per-device credentials to NVS at first boot — Mac-side `panel-provision` CLI over USB serial is the simplest fit (also options: BLE captive provisioning, or a pre-built `nvs.bin` flashed alongside the firmware). Pair with per-device users in Mosquitto's password file + ACLs limiting each user to their own `thread_panel/<id>/*` subtree. Net wins: public release artifacts (`firmware.bin`) carry no credentials at all → safe to publish; per-device blast radius if one is compromised; rotate one without touching the others. (Consolidates the V1 "Outstanding tech debt" item about plaintext sdkconfig credentials — same root issue, single fix.)
-- **Consistent device ↔ Pi ↔ UI/interface association.** Right now the link between a HA Device (per `panel_id` in the integration), a physical Pi (its hostname), and the served UI (hard-coded `panels/feeding_control/ui/dist/`) is implicit and split across three places. Unify under a single concept ("a panel = these three things linked together"). Probably surfaces as a `device/<hostname>.conf` (or per-Pi config in HA) that names: which product UI to serve, which `panel_id` this device claims, and which physical hardware variant (panel size, sensors present). Step 17 puts the UI under `/opt/panel/current/ui-dist/` regardless of product — this association layer determines *which* product's UI gets installed there.
-- **Repo reorg: tighter platform / product separation.** Likely outcome (subject to refinement): only the UI is genuinely product-specific. The current `panels/<id>/firmware/` is mostly platform code with a ~20-line `panel_app.c` shim — that shim could live in `platform/firmware/` driven by config. Same for `panels/<id>/ha/` (manifest only). End state: `panels/<id>/` contains a UI directory and a manifest file, nothing else. Couples with the device-association item above; the two should land together. Step 17 already moved the integration into `platform/integration/`; this is the firmware + manifest equivalent of that move.
-
-## Step 21 — Single-device robustness
-
-The "the one panel I have should keep working under edge cases" story. Independent of fleet support; pays off even with a single device.
-
-- **Tests & CI.** No automated tests anywhere right now. Most useful additions, in rough order: (1) bridge unit tests for the state cache + WS broadcast logic (pytest, minimal mocking); (2) integration tests that the HA `_handle_resync` actually republishes everything (HA test framework supports this); (3) UI component tests on the data-shape parsing in `useFeeder` (Vitest); (4) firmware build verification via GitHub Actions (no hardware in CI, just `idf.py build`); (5) end-to-end smoke test that a fresh Mac + Pi + C6 deploy yields a kiosk with data within N seconds. Step 17 explicitly defers CI as a V3 question, but the test-writing piece (1–3) is independent and worthwhile in V2.
-- **MQTT message fragmentation handling on the C6.** We currently rely on `buffer.size = 8 KB` being big enough for any single payload. esp-mqtt actually delivers oversized payloads as multiple `MQTT_EVENT_DATA` callbacks with `current_data_offset` / `total_data_len` set; our `forward_*` helpers just look at the first chunk. Real fix: accumulate fragments in `panel_app_on_data` until `data_len + offset == total_data_len`, then forward. Removes the buffer-tuning band-aid and handles arbitrarily large entity snapshots correctly.
-- **C6 UART rx state machine to ignore boot noise.** Companion to the bridge-side leading-`\n` fix. Currently `panel_uart.c::rx_task` accumulates everything between newlines; if Pi boot noise has no newlines, it sits in the buffer until the bridge's first newline-terminated write flushes it. Cleaner: only start accumulating after seeing `{`, drop bytes that don't fit a JSON-line pattern. Removes the bridge-side workaround.
-- **Slow post-power-cycle data backfill.** After cold boot the UI takes anywhere from 30s to 5–10min to populate with entity data, with high variance. Manual C6 reboot via MQTT usually clears it but not always (observed 2026-04-30: power cycle → wait → cold-boot reboot via MQTT → still empty UI; Pi reboot via MQTT also no help). We have no instrumentation to tell which phase contributes the variance — could be C6 Thread-attach, MQTT TLS handshake, retained-publish timing, bridge subscribe, or UI WS reconnect path. First step: add timestamped log lines at each landmark (C6: thread-up, mqtt-connected, first-state-published; bridge: ws-up, first-mqtt-msg-received; UI: mount, first-entity-render) and capture a slow boot to see where the time goes. Until that exists, attempts to fix this are guesswork.
-- **Pi clock drift on offline boot → wrong time in UI.** Pi Zero 2 W has no RTC and WiFi is off by default, so after a power-off the system clock comes back to whatever was last persisted, with no NTP to correct. The UI renders `Date()` against this drifted clock — observed 2026-04-30 showing ~7h 1m 45s behind real wall-clock time. The 7h piece is suspicious (matches PDT offset, 2026-04-30 is in PDT) and might be a timezone double-application bug overlaid on a smaller drift; needs disambiguation by checking what `date` reports on the Pi vs what the UI renders. Cleanest fix: have the C6 broadcast time-of-day over MQTT (it has Thread + SNTP and is online when on); UI reads from there instead of `Date()`. Alternatives: brief WiFi-up at Pi boot for one NTP sync (defeats offline-by-default), or add a hardware RTC. C6-broadcast wins on architecture fit.
-- **Ambient light sensor sensitivity bump.** Threshold/gain on the C6's TEMT6000 → MQTT publish path is too coarse; UI brightness/theme transitions feel sluggish to small lighting changes. Investigate at three layers: (a) C6 ADC sample-and-publish cadence (currently publishes only when value changes by N units; lower N), (b) any UI-side hysteresis/debounce on theme switch points, (c) whether the sensor itself is voltage-divider-limited at the bright end. (a) is the simplest first move. Pairs naturally with Step 19's "configurable presence/theme thresholds via HA" item, since the right end-state is HA `number` entities for these knobs rather than firmware constants.
-
-## Step 22 — Hardware affordances
-
-Things that depend on the panel hardware itself; mostly opportunistic.
-
-- **Brightness control.** Waveshare 6.25" has no software-controllable backlight. If the hardware is swapped or a Wayland gamma overlay turns out to work, revisit and add a `number` entity the cog kiosk reads. Hardware-gated.
-- **Thread mesh resilience monitoring.** V1 step 11's "Thread mesh flapping under load" was fixed by switching the C6 to MTD, but we have no ongoing visibility. Surface OpenThread mesh-error counters as a diagnostic sensor in HA so degradation shows up before it manifests as command latency.
-- **Cold-start LCD streakiness on Waveshare 6.25".** After the panel has been off for several hours, first power-on shows every-other-row shifted/non-updating across portions of the screen, often with a sharp vertical boundary where one side renders cleanly and the other is corrupted. Resolves slowly over ~5+ minutes (or repeated power cycles), with the clean region sweeping across the screen until the whole panel recovers. Pattern (row-skip + thermal sweep) suggests cold-temperature LCD/gate-driver response or a slow PSU ramp on the panel's onboard regulator — not a software bug. Investigate: (a) thermal test — pre-warm the panel before power-on vs. cold-start to confirm temp-driven; (b) scope the panel's 5V/3V3 rails on cold boot for ramp shape and any sag; (c) contact Waveshare for known issue / hardware revision differences. Hardware-gated; the realistic outcome may be "different display" if it's intrinsic to this batch.
-
-## Step 23 — Per-component release cadence
-
-The "I want to ship an integration tweak without recutting firmware (and vice versa)" story. Today every cut bumps a single repo-wide version, so a one-character fix to `update.py` requires building the firmware, the UI bundle, the bridge tarball, and re-flashing the C6. The other direction is also true: a firmware change forces an integration release that HA users have to "update" to even though nothing they care about changed.
-
-**Three viable shapes, with HACS as the binding constraint:**
-
-1. **Multiple tag prefixes in one repo.** `integration-vX.Y.Z` for HACS-relevant cuts; `panel-vX.Y.Z` for firmware/UI/bridge cuts. Each release contains only the artifacts relevant to its prefix.
-   - **HACS limitation:** `HacsManifest` has no tag-pattern filter (verified earlier — fields are `name, country, filename, hacs, hide_default_branch, homeassistant, manifest, name, persistent_directory, render_readme, zip_release, content_in_root` and that's it). So HACS will offer ALL releases as "update" candidates, including `panel-*` releases that have no integration zip — picking one would 404 the install.
-   - **Workaround:** make HACS's `filename` resolve correctly only for `integration-*` releases by uploading a no-op `thread_panel.zip` to `panel-*` releases too, OR document "HACS only — pick integration-* tags". Both are fragile.
-2. **Two repos.** Split the integration into `chaddugas/thread_panel_integration` (HACS-tracked) and keep the panel/firmware/bridge in `chaddugas/thread_control_panel`. Each has its own release cadence; HACS only sees the integration repo. Cleanest separation but doubles maintenance and complicates cross-repo coordination (e.g., MQTT topic schema changes that require both sides to land together).
-3. **Single repo with smart sha-skipping.** Repo-wide version stays as today, but `cut-release` checks each component's content against the previous release and SKIPS uploading + listing in manifest.json if its sha hasn't changed. The C6/Pi installer already supports per-component sha skipping (see `manifest.json` schema + V2 doc's "Per-component sha256 in manifest handles 'only re-flash if changed'" decision). For HACS specifically: `update.py` could compare the integration's sha across releases and present "no update available" when only firmware changed. Keeps current architecture; layered enhancement on the existing release pipeline.
-
-**Recommended ordering when this becomes the right time to tackle:**
-
-- (3) is the smallest delta from today's pipeline and addresses most of the pain. Probably the right starting point.
-- (1) only makes sense if HACS gains tag-pattern support upstream. Worth filing an issue against HACS to gauge interest, but don't build on it.
-- (2) is the architecturally cleanest if multi-product (Step 19's repo reorg) lands first, since the integration would already be more decoupled by then.
-
-Interactions with other steps:
-- **Step 19** (HA integration UX, config flow + splash) — tighter integration code is more likely to want its own cadence; do this after 19's churn settles.
-- **Step 20** (multi-device / fleet) — repo reorg there could naturally split firmware product code from integration platform code, making a two-repo split (option 2) cheaper.
-- **Step 17 Phase 3b validation** — should be fully closed (open-issue items A and B in "Phase 3b — open issues" above) before touching the release pipeline. Don't change the pipeline while still iterating on what it produces.
-
----
-
-## Technical Debt
-
-### Outstanding
-
-- **Persistent journald on existing panels needs a manual one-time bootstrap.** Step 17b Commit A added the `Storage=persistent` config + sudoers-protected setup to install-pi.sh, but existing panels installed with an older install-pi.sh don't have either piece. Mirroring the config write into panel-update.sh was attempted and reverted on 2026-04-30 because the existing `/etc/sudoers.d/panel-bridge` doesn't allow `sudo tee /etc/systemd/journald.conf.d/panel.conf` or `sudo systemctl restart systemd-journald` non-interactively, and the file that would grant those perms (sudoers itself) can't be self-bootstrapped from panel-update.sh either. Two reasonable paths if this becomes worth automating: (a) widen the sudoers entries in the next install-pi.sh re-run so panel-update.sh can do drift correction on subsequent OTAs, then ship the panel-update.sh function; (b) accept that journald is bootstrap-time-only and document the manual one-liner in the README. For now the workaround on existing panels is to SSH in and run the equivalent commands by hand — see Step 17b's diagnostic-capture section.
-
-- **Firmware retains every panel_state envelope, including event-stream topics.** [panel_app.c:245](../panels/feeding_control/firmware/main/panel_app.c#L245) publishes all `panel_state` messages with `retain=1`. That's correct for state topics (`wifi_ssid`, `version`, etc.) where new subscribers should immediately see the current value. It's wrong for event-stream topics like `update_status`, where retained replays mean "ghost installs" appear at HA startup. The integration-side fix in beta.22 (skip `msg.retain` on `_on_update_status_message`) papers over this, but the architectural fix is to teach the C6 which envelopes are events vs. state and pass the correct retain flag. Currently the bridge sends a flat `panel_state` envelope with no event/state distinction; would need a schema bump (e.g., `"type":"panel_event"` vs `"type":"panel_state"`) and a corresponding split in the C6 publish path. Low urgency now that the integration ignores stale retains, but worth doing before adding more event-stream topics.
-
-### Resolved
-
-(none yet)
 
 ## Lessons Learned
 
@@ -773,10 +653,26 @@ Interactions with other steps:
 
 - **Bridge spawns `/opt/panel/current/deploy/panel-update.sh` at request time, which is the OLD version's script — the symlink swap to the new version happens partway through.** Practical implication: any change to `panel-update.sh` only takes effect on the OTA *after* the one that installs it. To validate a fix to `panel-update.sh`, you need two OTAs: cut N → trigger OTA, then cut N+1 → trigger OTA. The first one installs the fix, the second one runs it. C6-firmware fixes don't have this delay because the C6 is already running the firmware that handles the post-flash reboot.
 
+- **Commit subject scope prefixes should be unambiguous in any rendering context.** Commits prefixed `update entity:` were displayed as bullet points inside HA's update entity dialog (auto-generated release notes), where they read as if HA was announcing something about the entity itself. Use file/class names (`PanelUpdateEntity:`, `update.py:`, `panel_app.c:`) over loose noun phrases for any future scope prefix.
+
 ## Proven Facts
 
 - **OTA round-trip latency:** beta.9 → beta.10 took ~140s end-to-end on the production Pi/C6: download + extract ~10s, venv + symlink swap ~65s, healthcheck 30s, panel-flash ~22s, C6 reboot + MQTT reconnect + republish ~6s, wifi-off skip + done ~1s. Healthcheck dominates the wait — could be tightened if iteration speed becomes a bottleneck (currently it's a feature: catches a bouncing service before we flash the C6).
 
-- **Broker is not externally reachable.** Verified 2026-04-30: cellular `openssl s_client -connect the-interstitial-space.duckdns.org:8883` and `:1883` both time out on v4. No AAAA record on the duckdns subdomain. HA box has only ULA + link-local v6 (no globally-routable v6 address). MQTT credential leak via `firmware.bin` published in public releases is therefore LAN-blast-radius only — not zero risk, but bounded to anyone already on the LAN. Step 20 (NVS-provisioned per-device creds) remains the right long-term fix; not urgent.
+- **NM connection-up takes ~60s on this panel after a radio cycle.** Observed 2026-04-30: WiFi state machine walked from `connecting` to `connected` in 63s after a fresh `nmcli radio wifi on`. Sits 3s under the OTA's 60s `waiting_for_connection` timeout; bumping to 120s captured in the Quality of life group.
 
-- **`chaddugas` user has wide-open `NOPASSWD:ALL` via `/etc/sudoers.d/010_pi-nopasswd`** (Pi-imager first-boot drop-in). This is what makes `sudo chown $USER /dev/tty1` work on the production Pi without our explicit sudoers entry. The entry we added in `install-pi.sh`'s drop-in is for cleanliness on Pis that don't have the imager's wide-open rule.
+- **Broker is not externally reachable.** Verified 2026-04-30: cellular `openssl s_client -connect the-interstitial-space.duckdns.org:8883` and `:1883` both time out on v4. No AAAA record on the duckdns subdomain. HA box has only ULA + link-local v6 (no globally-routable v6 address). MQTT credential leak via `firmware.bin` published in public releases is therefore LAN-blast-radius only — not zero risk, but bounded to anyone already on the LAN.
+
+- **`chaddugas` user has wide-open `NOPASSWD:ALL` via `/etc/sudoers.d/010_pi-nopasswd`** (Pi-imager first-boot drop-in). This is what makes `sudo chown $USER /dev/tty1` work on the production Pi without our explicit sudoers entry. The entry we added in `install-pi.sh`'s drop-in is for cleanliness on Pis that don't have the imager's wide-open rule. Phase 1 Group C plans to override this.
+
+- **Git history is clean of MQTT credentials.** `git log -S 'myvxan' --all` returns nothing — sdkconfig has been gitignored from the start. The only credential leak path is the published `firmware.bin` artifacts on GitHub releases.
+
+## Technical Debt
+
+### Outstanding
+
+(empty — all known debt items have been re-homed into Phase 1, Phase 2, or Phase 3+ above)
+
+### Resolved
+
+(empty — populated as items get closed out)
