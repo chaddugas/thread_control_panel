@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,19 @@ log = logging.getLogger(__name__)
 
 CREDS_FILE = Path("/opt/panel/mqtt_creds.json")
 WATCH_INTERVAL_S = 5.0
+
+# Even when the file hasn't changed, re-send creds to the C6 every
+# RESEND_INTERVAL_S seconds. The C6 no-ops on identical user+pass, so
+# the only cost is one ~100-byte UART message per minute. The benefit
+# is that a freshly-booted C6 (e.g. after an OTA flash, after a
+# manual cmd/reboot_c6, or after a power cycle that the bridge didn't
+# witness) gets re-provisioned within the interval — no manual bridge
+# bounce required to recover from "C6 lost NVS" or "C6 booted into a
+# new firmware that hasn't been provisioned yet."
+#
+# 60s sits comfortably under panel-update.sh's 90s verifying_c6
+# timeout, so a Phase-1 OTA can succeed without intervention.
+RESEND_INTERVAL_S = 60.0
 
 # Caps must stay in sync with panel_net.c's MQTT_USER_MAX_LEN /
 # MQTT_PASS_MAX_LEN (those include the null terminator; these are
@@ -134,35 +148,54 @@ async def _send(uart: Any, user: str, pw: str) -> bool:
 
 
 async def run(uart: Any) -> None:
-    """Background task: send creds at startup, re-send on file change.
+    """Background task: send creds at startup, on file change, and
+    periodically as a safety net.
 
     Runs forever as part of the bridge's `asyncio.gather`. The C6
-    no-ops on identical creds, so we send unconditionally on first
-    sight and on every mtime change without tracking what we sent
-    last — keeps the state machine here trivial.
+    no-ops on identical creds, so re-sending is cheap — that's the
+    design contract that lets us keep the state machine here trivial:
+
+      - Refresh `cached_creds` from disk only on file mtime change
+        (validation-error logs don't repeat every iteration).
+      - Send when (a) the file just changed AND we have valid creds,
+        OR (b) RESEND_INTERVAL_S has elapsed since the last send AND
+        we have valid creds. (b) is what lets a freshly-booted C6
+        pick up provisioning without a bridge bounce.
     """
     last_mtime: float | None = None
+    cached_creds: tuple[str, str] | None = None
+    last_send_at: float = 0.0
 
     while True:
         try:
+            now = time.monotonic()
+
             try:
                 current_mtime = CREDS_FILE.stat().st_mtime
             except FileNotFoundError:
                 current_mtime = None
 
-            if current_mtime != last_mtime:
+            file_changed = current_mtime != last_mtime
+            if file_changed:
+                last_mtime = current_mtime
                 if current_mtime is None:
                     log.warning(
                         "mqtt_creds: %s missing — C6 will stay unprovisioned "
                         "until install-pi.sh writes it",
                         CREDS_FILE,
                     )
+                    cached_creds = None
                 else:
-                    creds = _read_and_validate()
-                    if creds is not None:
-                        user, pw = creds
-                        await _send(uart, user, pw)
-                last_mtime = current_mtime
+                    cached_creds = _read_and_validate()
+                    # _read_and_validate logs its own validation
+                    # errors. We don't double-log here.
+
+            if cached_creds is not None:
+                due_for_resend = (now - last_send_at) >= RESEND_INTERVAL_S
+                if file_changed or due_for_resend:
+                    user, pw = cached_creds
+                    if await _send(uart, user, pw):
+                        last_send_at = now
 
             await asyncio.sleep(WATCH_INTERVAL_S)
 

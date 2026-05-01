@@ -29,9 +29,9 @@ V2 development is active. Shipped through v2.0.0-beta.28:
 - **Step 17 Phase 3b**: HA-side `update.PanelUpdateEntity` ✅
 - **Step 17b**: WiFi state surface + observability ✅
 
-**Up next**: [Phase 1 — Security](#phase-1--security) (move MQTT credentials out of firmware, rotate creds, scrub historical leakage, tighten authorization surface, add OTA tamper-resistance).
+**In flight**: [Phase 1 Group A — Move MQTT credentials out of firmware](#group-a-move-mqtt-credentials-out-of-firmware). Five commits on main covering the C6 NVS-credential path, bridge file-watcher + delivery, install-pi.sh prompt, Kconfig cleanup, and a periodic re-send (so the first Phase-1 OTA succeeds without manual recovery). Beta.29 cut + production OTA validation are the next steps.
 
-After Phase 1: [Phase 2 — Polish & cleanup](#phase-2--polish--cleanup), then themed groups in no strict order.
+**After Group A ships**: [Group B](#group-b-rotate-credentials--scrub-historical-leakage) (rotate the leaked password, scrub historical `firmware.bin` assets), then Groups C and D in Phase 1, followed by [Phase 2 — Polish & cleanup](#phase-2--polish--cleanup) and the themed groups beyond.
 
 ## Keeping this current
 
@@ -100,14 +100,49 @@ Confirmed scope (no deferred items — every group is committed Phase 1 work).
 
 ### Group A: Move MQTT credentials out of firmware
 
+**Status (2026-05-01)**: All 5 commits on main. Beta.29 release cut + first-OTA validation are the remaining steps.
+
 Today the C6 firmware has `CONFIG_MQTT_USERNAME` and `CONFIG_MQTT_PASSWORD` baked in via sdkconfig. Every published `firmware.bin` carries them. `strings firmware.bin | grep -i myvxan` returns the password instantly.
 
-- C6 firmware: read MQTT creds from NVS at startup. New "provisioning required" state when NVS is empty — firmware sits idle (Thread up, no MQTT client) until it receives provisioning over UART.
-- Add UART envelope `panel_set_creds` (Pi → C6) carrying `{username, password}`. C6 writes to NVS, then (re)starts its MQTT client with the new creds.
-- Bridge: read `/opt/panel/mqtt_creds.json` (mode 0600, root-only) at startup; send via the new UART envelope. Watch for file changes and re-provision so credential rotation is in-place.
-- `install-pi.sh`: prompt for MQTT username + password (gum prompts), write to `/opt/panel/mqtt_creds.json`. Validation: non-empty username, password ≥ 12 chars.
-- sdkconfig: remove `CONFIG_MQTT_USERNAME` / `CONFIG_MQTT_PASSWORD`. Defaults become empty; firmware refuses to connect until provisioned.
-- Acceptance: `strings firmware.bin | grep -i pass` returns nothing for the post-Phase-1 firmware artifacts.
+- C6 firmware: reads MQTT creds from NVS at startup (namespace `panel_mqtt`, keys `user` / `pass`). "Provisioning required" state when NVS is empty — firmware sits idle (Thread up, no MQTT client) until it receives provisioning over UART.
+- New UART envelope `panel_set_creds` (Pi → C6) carrying `{username, password}`. C6 writes to NVS only on change (no-op when identical), then (re)starts its MQTT client. C6 sends `panel_set_creds_ack` back over UART for bridge-side debug visibility.
+- Bridge: reads `/opt/panel/mqtt_creds.json` (mode 0600, owned by install user) at startup; sends via the new UART envelope. Re-sends on file mtime change AND every 60s as a safety net so a freshly-booted C6 (post-OTA-flash, post-power-cycle, post-reboot) gets provisioned without manual intervention.
+- `install-pi.sh`: prompts for MQTT username + password, writes to `/opt/panel/mqtt_creds.json` atomically (mktemp + 0600 + mv). Validation: username 1–64 chars; password 12–128 chars + at least 2 of {letter, digit, symbol}; neither field may contain `"` or `\` (the C6's substring-based JSON parser doesn't handle escapes); ASCII-printable only.
+- Kconfig: `MQTT_USERNAME` and `MQTT_PASSWORD` config options removed entirely. `MQTT_BROKER_URI` and `MQTT_CLIENT_ID` stay (public, no secrets).
+- Acceptance: `strings firmware.bin | grep -i myvxan` returns nothing for the next firmware build.
+
+**Commits on main**:
+
+| SHA | Subject |
+|---|---|
+| `da4d2dd` | panel_net + panel_app: NVS-backed MQTT credentials + panel_set_creds UART |
+| `f0d6293` | panel_bridge: NVS-credential delivery via mqtt_creds.json + panel_set_creds UART |
+| `6581c88` | install-pi.sh + Kconfig: collect MQTT creds at install time, drop CONFIG_MQTT_USERNAME / PASSWORD |
+| (next) | panel_bridge.mqtt_creds: periodic re-send so OTA C6-flash provisioning works without manual recovery |
+
+**Validation plan** — when beta.29 is cut:
+
+1. **Local build (Mac)**:
+   ```bash
+   cd panels/feeding_control/firmware && idf
+   idf.py reconfigure                                          # purge orphaned CONFIG_MQTT_USERNAME/PASSWORD
+   grep -E '^CONFIG_MQTT_(USERNAME|PASSWORD)' sdkconfig        # must return nothing
+   idf.py build
+   strings build/feeding_control.bin | grep -i myvxan          # must return nothing — security acceptance
+   ```
+2. **Pre-OTA migration on production Pi** (SSH in):
+   ```bash
+   sudo tee /opt/panel/mqtt_creds.json >/dev/null <<'EOF'
+   {"username": "mqtt_user", "password": "<current-password>"}
+   EOF
+   sudo chown $USER /opt/panel/mqtt_creds.json
+   sudo chmod 0600 /opt/panel/mqtt_creds.json
+   ```
+3. **Cut beta.29** from Mac with a release-notes block describing this migration step for anyone else following along.
+4. **HACS** update Thread Panel integration → restart HA.
+5. **Trigger OTA** from HA's update entity. Should succeed end-to-end thanks to the periodic re-send (within 60s of the C6 booting new firmware, the bridge re-sends `panel_set_creds`, C6 writes NVS + commits the partition + connects MQTT, `verifying_c6` sees `state/version`).
+6. **Power-cycle test**: unplug + replug the panel. On cold boot, C6 reads NVS → has creds → connects MQTT immediately. Confirms NVS persistence across reboots.
+7. **(Optional) In-place rotation smoke test**: `sudo touch /opt/panel/mqtt_creds.json` → bridge file-watcher fires within 5s → C6 receives `panel_set_creds` → no-ops on identical creds. Confirms the rotation path is wired up for Group B.
 
 ### Group B: Rotate credentials + scrub historical leakage
 
