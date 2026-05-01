@@ -330,27 +330,33 @@ rm -rf "$STAGING"
 
 # ===== remove Pi-imager's blanket NOPASSWD: ALL =====
 #
-# Pi-imager's first-boot setup writes `chaddugas ALL=(ALL) NOPASSWD:ALL`
-# into /etc/sudoers.d/010_pi-nopasswd, which makes EVERY sudo invocation
-# password-free — including ones never intended (apt, arbitrary scripts,
-# etc.). Our /etc/sudoers.d/panel-bridge rules are scoped to specific
-# commands; the Pi-imager rule undoes that scoping by allowing everything
-# else.
+# Pi-imager's first-boot setup writes `<user> ALL=(ALL) NOPASSWD: ALL` into
+# a drop-in under /etc/sudoers.d/. The filename varies by imager version:
+# 010_pi-nopasswd (older), <username> (current Bookworm imager), or
+# userconf-pi (some variants). Detect by content (lines ending in
+# `NOPASSWD: ALL`) rather than filename so all variants get caught.
 #
-# Defense in depth: remove the Pi-imager drop-in so passwordless sudo is
-# limited to what /etc/sudoers.d/panel-bridge explicitly grants. Future
-# install-pi.sh re-runs (and any other interactive sudo) will prompt for
-# password as normal Linux behavior — sudo's ~15min credential cache
-# means a single password entry covers a typical session.
+# Without this, every sudo invocation is password-free, which undoes the
+# scoping in /etc/sudoers.d/panel-bridge. Our panel-bridge file uses
+# NOPASSWD-per-specific-command (not NOPASSWD: ALL), so the regex below
+# excludes it via grep -v even if the find pattern accidentally matched.
 #
-# Done at the end of install-pi.sh so all the earlier sudo-needing setup
-# (apt install, systemctl, sudoers writes, etc.) runs without prompting
-# even on a fresh Pi where Pi-imager's drop-in is still active.
-# Idempotent: no-op if the file's already gone (re-run case).
+# Done at the end of install-pi.sh so all earlier sudo-needing setup runs
+# without prompting on a fresh Pi where Pi-imager's drop-in is still
+# active. Subsequent sudo invocations (interactive ssh, future
+# install-pi.sh runs, panel-update.sh, ad-hoc admin) prompt for password
+# as normal Linux behavior; sudo's ~15min credential cache covers a
+# typical session. Idempotent: no-op once matching files are gone.
 
-if [ -f /etc/sudoers.d/010_pi-nopasswd ]; then
-    echo "→ Removing Pi-imager's NOPASSWD:ALL drop-in (defense-in-depth)..."
-    sudo rm /etc/sudoers.d/010_pi-nopasswd
+suspects=$(sudo grep -lrE 'NOPASSWD:[[:space:]]*ALL[[:space:]]*$' \
+    /etc/sudoers.d/ 2>/dev/null \
+    | grep -v '^/etc/sudoers.d/panel-bridge$' || true)
+
+if [ -n "$suspects" ]; then
+    for f in $suspects; do
+        echo "→ Removing $f (grants NOPASSWD: ALL — defense-in-depth)..."
+        sudo rm "$f"
+    done
 fi
 
 # ===== done =====
