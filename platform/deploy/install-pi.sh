@@ -328,25 +328,22 @@ lib_prune_old_versions "$PREV_TARGET"
 
 rm -rf "$STAGING"
 
-# ===== remove Pi-imager's blanket NOPASSWD: ALL =====
+# ===== remove any blanket NOPASSWD: ALL drop-ins =====
 #
-# Pi-imager's first-boot setup writes `<user> ALL=(ALL) NOPASSWD: ALL` into
-# a drop-in under /etc/sudoers.d/. The filename varies by imager version:
-# 010_pi-nopasswd (older), <username> (current Bookworm imager), or
-# userconf-pi (some variants). Detect by content (lines ending in
-# `NOPASSWD: ALL`) rather than filename so all variants get caught.
-#
-# Without this, every sudo invocation is password-free, which undoes the
-# scoping in /etc/sudoers.d/panel-bridge. Our panel-bridge file uses
-# NOPASSWD-per-specific-command (not NOPASSWD: ALL), so the regex below
-# excludes it via grep -v even if the find pattern accidentally matched.
+# Defense in depth: scrub any /etc/sudoers.d/* drop-in granting wide-open
+# NOPASSWD: ALL so passwordless sudo is limited to what panel-bridge
+# explicitly allows. Sources of such a drop-in vary — manual setup steps,
+# Pi-imager defaults, prior tooling — so detect by content rather than
+# filename. The regex matches lines ending in `NOPASSWD: ALL` (with
+# optional surrounding whitespace), which catches the wide-open form
+# without flagging the per-command rules in our own panel-bridge file
+# (where each line ends with a specific command path, not `ALL`).
 #
 # Done at the end of install-pi.sh so all earlier sudo-needing setup runs
-# without prompting on a fresh Pi where Pi-imager's drop-in is still
-# active. Subsequent sudo invocations (interactive ssh, future
-# install-pi.sh runs, panel-update.sh, ad-hoc admin) prompt for password
-# as normal Linux behavior; sudo's ~15min credential cache covers a
-# typical session. Idempotent: no-op once matching files are gone.
+# without prompting on a fresh Pi (or one with an existing wide-open
+# rule). After this, interactive sudo prompts for password as normal
+# Linux behavior; sudo's ~15min credential cache covers a typical session.
+# Idempotent: no-op once matching files are gone.
 
 suspects=$(sudo grep -lrE 'NOPASSWD:[[:space:]]*ALL[[:space:]]*$' \
     /etc/sudoers.d/ 2>/dev/null \
