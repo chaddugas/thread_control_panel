@@ -723,6 +723,13 @@ PY
 
   # ----- success: clean up staging -----
   rm -rf "$staging"
+  # Also remove the off-main HACS-layout staging directory at the repo
+  # root. It's only needed during the release (cp + substitute __REPO__ +
+  # git add for the off-main commit); afterwards it's just untracked
+  # noise that surfaces in `git status` between releases. The next
+  # cut-release run pre-cleans it anyway via the rm -rf at line ~384,
+  # but that left the directory sitting around between runs.
+  rm -rf "$repo_root/custom_components"
 
   local origin repo_path
   origin=$(git -C "$repo_root" remote get-url origin 2>/dev/null || print "")
