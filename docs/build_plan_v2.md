@@ -700,7 +700,7 @@ Convention chosen over a two-stage flow (release-type then bump) because it matc
 
 | Path | Change |
 |---|---|
-| `tools/cut-release.zsh` | Add interactive bump prompt (gum), firmware build, tarballing, zip, manifest.json, gh release create with --prerelease flag |
+| `tools/cut-release` | Add interactive bump prompt (gum), firmware build, tarballing, zip, manifest.json, gh release create with --prerelease flag |
 | `platform/deploy/install-pi.sh` | Switch from git-clone to release-artifact pull; add `fbcon=rotate:3` + console-setup; render systemd units pointing at `/opt/panel/current/`; configure persistent journald (Step 17b) |
 | `platform/deploy/panel-bridge.service` | `ExecStart=/opt/panel/current/bridge/...` |
 | `platform/deploy/panel-ui.service` | Root at `/opt/panel/current/ui-dist/` |

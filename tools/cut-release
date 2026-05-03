@@ -2,8 +2,14 @@
 # cut-release — build artifacts, tag, push, and publish a GitHub release.
 #
 # Usage:
-#   Source this file (e.g. from ~/.zshrc) so `cut-release` is on your PATH,
-#   or run it ad-hoc:  source /path/to/tools/cut-release.zsh && cut-release
+#   Run directly:  ./tools/cut-release
+#   Or wire a zsh function in your ~/.zshrc that runs it from the repo root:
+#     cut-release() { (cd "$(git rev-parse --show-toplevel)" && ./tools/cut-release "$@") }
+#
+# Was previously a sourced function (`source tools/cut-release.zsh && cut-release`),
+# which led to stale-definition bugs after edits since shells cache the
+# sourced body. Now invoked as a script — every run picks up the latest
+# code on disk.
 #
 # Prerequisites (checked at start, bails with install instructions if missing):
 #   - Active ESP-IDF v6.0 shell ($IDF_PATH set; run `idf` first)
