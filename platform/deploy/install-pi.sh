@@ -203,6 +203,29 @@ $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/chvt 1
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/setfont Lat15-TerminusBold32x16
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/setterm --term linux --blank 0 --powerdown 0
 $INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/chown $INSTALL_USER /dev/tty1
+
+# Systemd unit rewrites (install-lib.sh / lib_render_units, called from
+# both install-pi.sh and panel-update.sh's OTA flow). Per-unit explicit
+# rules avoid wildcard /etc/systemd/system/* grants that would let any
+# unit file be written.
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/panel-bridge.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/panel-ui.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/cog.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/chmod 0644 /etc/systemd/system/panel-bridge.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/chmod 0644 /etc/systemd/system/panel-ui.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/chmod 0644 /etc/systemd/system/cog.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/rm /etc/systemd/system/panel-bridge.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/rm /etc/systemd/system/panel-ui.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/rm /etc/systemd/system/cog.service
+
+# Legacy V1 unit cleanup (install-lib.sh / lib_render_units's first loop).
+# Cage was the V1 kiosk; V2 uses cog. Already-V2 Pis no-op these.
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl stop cage.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl disable cage.service
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/systemd/system/cage.service
+
+# Reload systemd config after rewriting unit files (lib_render_units).
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
 EOF
 sudo chmod 0440 /etc/sudoers.d/panel-bridge
 
