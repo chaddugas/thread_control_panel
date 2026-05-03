@@ -48,3 +48,5 @@ venv/
 # after finishing a chunk of work; user reviews/edits before committing).
 # Set `git config commit.template <repo-path>/.gitmessage.txt` to use.
 .gitmessage.txt
+
+docs/*.yaml
