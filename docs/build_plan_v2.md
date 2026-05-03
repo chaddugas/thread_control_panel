@@ -21,7 +21,7 @@
 
 ## Status
 
-V2 development is active. Shipped through v2.0.0-beta.30:
+V2 development is active. **Phase 1 — Security closed in v2.0.0-beta.33.** Shipped:
 
 - **Step 17 Phase 1**: artifact-based releases + repo restructure ✅
 - **Step 17 Phase 2**: C6 UART OTA receiver + panel-flash CLI ✅
@@ -31,10 +31,9 @@ V2 development is active. Shipped through v2.0.0-beta.30:
 - **Phase 1 Group A**: MQTT credentials out of firmware (NVS-backed) ✅
 - **Phase 1 Group B**: rotate leaked password + scrub historical `firmware.bin` assets ✅
 - **Phase 1 Group C**: authorization surface tightening — narrowed sudoers, removed wide-open NOPASSWD: ALL drop-in, kept wifi password out of recorder, fixed same-version OTA rejection ✅
+- **Phase 1 Group D**: OTA tamper-resistance — ed25519 firmware signing via minisign, sign in cut-release, verify in `lib_download_artifacts` ✅
 
-**In flight**: [Phase 1 Group D — OTA tamper-resistance (firmware signing)](#group-d-ota-tamper-resistance-firmware-signing). ed25519 keypair, sign `firmware.bin` in cut-release, verify signature in panel-update.sh before forwarding to C6.
-
-**After Group D ships**: Phase 1 closes; on to [Phase 2 — Polish & cleanup](#phase-2--polish--cleanup) and the themed groups beyond.
+**In flight**: [Phase 2 — Polish & cleanup](#phase-2--polish--cleanup). Repo organization for multi-panel readiness, dead-code sweep, DRY pass, comment hygiene, foundational tests. After Phase 2: themed groups under [Phase 3+](#phase-3--themed-groups) (no strict ordering — pick whichever fits the moment).
 
 ## Keeping this current
 
@@ -170,13 +169,57 @@ The rotation is what actually closes the hole. Asset deletion is hygiene — Git
 - ✅ **C3 — Wifi password kept out of recorder**. **Plan changed mid-flight**: the original V2 plan said "ship a recorder-exclude rule with the integration", but HA's recorder filter is built once at startup from `configuration.yaml` and isn't extensible from an integration (verified via HA developer docs + recorder docs + community feature-request threads — no programmatic API exists). Storing-outside-state is the only way to actually keep the value out of the recorder DB. `PanelWifiPasswordText.async_set_value` now stashes the typed value in `hass.data[DOMAIN][DATA_ENTITIES][panel_id][VALUE_REGISTRY_KEY]` and never calls `async_write_ha_state` — state stays empty for the entity's lifetime. `PanelWifiConnectButton` reads from `hass.data` instead of `hass.states.get(text_id).state`. Trade-off: password doesn't survive HA frontend navigation (typed-then-navigate-away clears it), but the typical flow is type-and-immediately-press-Connect, so this matches existing UX.
 - ✅ **Bonus — same-version OTA fix**. Closes the bug originally filed in [Robustness & correctness](#robustness--correctness): `panel-update.sh` refused same-version OTAs wholesale, even when only the C6 needed flashing. Now skips the destructive Pi-side phases (download/extract/venv/symlink-swap/restart) when version matches current via a `SKIP_PI_INSTALL` flag, but still runs the C6 flash unconditionally. Validated via OTA-from-HA when Pi was already on the target version: `pi_already_current` → `flashing_c6` → `c6_verified` → `done`.
 
-### Group D: OTA tamper-resistance (firmware signing)
+### Group D: OTA tamper-resistance (firmware signing) ✅ DONE
 
-- Generate an ed25519 signing keypair (offline; private key stored only on the build machine).
-- During `cut-release`: sign `firmware.bin` with the private key; attach `firmware.bin.sig` as a release artifact.
-- During `panel-update.sh`: download the signature alongside the binary; verify against the bundled public key (compiled into the bridge or stored under `/opt/panel/`) before forwarding to the C6.
-- Public key bundled in the bridge tarball; rotated only if the private key is suspected compromised.
-- Decision: not pursuing C6 hardware secure boot in this phase. The bridge-verified pipeline closes the OTA-tamper threat without invasive C6 changes; secure boot stays available as a future hardening step if the threat model warrants.
+**Status (2026-05-02)**: Shipped in v2.0.0-beta.33. Validated end-to-end on the production Pi: install-pi.sh from beta.33 apt-installed minisign, downloaded `firmware-signing.pub` + the `<firmware>.bin.minisig` sibling, ran `minisign -V` against each firmware bin successfully; same path then exercised through panel-update.sh's OTA flow (lib_download_artifacts is the shared verification entry point). beta.33's release initially missed the signature artifacts due to the [cut-release sourced-function staleness bug](#developer-ergonomics) — recovered by manually signing the existing `firmware.bin` locally and `gh release upload`-ing the `.minisig` + `.pub` directly to beta.33 (same shape as cut-release would have produced).
+
+#### Implementation summary
+
+- **Signing tool**: minisign (ed25519). `brew install minisign` on the Mac, `apt install minisign` on the Pi (added to install-pi.sh's bootstrap).
+- **Signing key**: plaintext at `~/.config/thread_control_panel/firmware-signing.key` (mode 0600), keygen with `minisign -G -W` so no passphrase prompt at every cut-release. Override path via `PANEL_SIGNING_KEY` env var.
+- **Public key**: committed at [`platform/deploy/firmware-signing.pub`](../platform/deploy/firmware-signing.pub) (key id `33DEA140A371B656`); cut-release ships it as a top-level loose release artifact alongside `install-pi.sh`.
+- **Signature artifact**: `<firmware>.bin.minisig` — sibling of each panel's firmware bin. Convention-named, not listed in `manifest.json` (lib_download_artifacts derives the URL by sibling lookup).
+- **Trust model**: pubkey ships with each release as the top-level `firmware-signing.pub` and is downloaded fresh by lib_download_artifacts each time. Protects against transit corruption / CDN tampering — sha256 already covers integrity, signing adds authenticity (the binary came from someone with the signing key, not just from someone who can recompute sha256s). Doesn't protect against a release-write-access compromise (attacker swapping pubkey + binary together) — that's the future "pinned trust anchor at first install" hardening step, deferred per the user's threat model (personal home use, broker not externally reachable).
+- **C6 hardware secure boot**: deferred to V3. ESP32-C6 secure boot v2 burns keys to one-time-programmable eFuses — irreversible, fragile to set up, and the bridge-verified path already covers the realistic threat model. Revisit if/when the project ever ships to other people.
+
+#### Key generation (one-time on the Mac)
+
+```bash
+brew install minisign
+mkdir -p ~/.config/thread_control_panel
+minisign -G -W \
+  -p ~/.config/thread_control_panel/firmware-signing.pub \
+  -s ~/.config/thread_control_panel/firmware-signing.key
+chmod 600 ~/.config/thread_control_panel/firmware-signing.key
+cp ~/.config/thread_control_panel/firmware-signing.pub \
+   "$(git rev-parse --show-toplevel)/platform/deploy/firmware-signing.pub"
+git add platform/deploy/firmware-signing.pub && git commit
+```
+
+`-W` skips passphrase encryption on the secret key. Back up the secret key to your password manager — losing it means rotation.
+
+#### Rotation procedure
+
+If the signing key is suspected compromised, or if you just want to roll keys periodically:
+
+1. Generate a new keypair (see above) — **do not** overwrite the old `~/.config/thread_control_panel/firmware-signing.key` until step 4 is done; you'll need it to verify any in-flight artifacts mid-rollout.
+2. Replace `platform/deploy/firmware-signing.pub` with the new public key, commit, push.
+3. Cut a new release (`cut-release`) — the new release ships the new pubkey + a firmware.bin signed with the new private key.
+4. Run `install-pi.sh` from the new release on each Pi — downloads the new pubkey, verifies the new firmware.bin against it. Successful install means the rotation is live on that Pi.
+5. Rotate the old `~/.config/.../firmware-signing.key` to a backup location (or destroy if the rotation was due to compromise).
+
+Subsequent OTAs verify against whatever pubkey is in the current release — no per-Pi rotation step needed.
+
+#### Recovery if the private key is lost
+
+There's no recovery path — without the private key, no new firmware can be signed, which means no OTAs can be issued. To get out of this state:
+
+1. Generate a new keypair (above).
+2. Cut a release with the new pubkey baked in. **This release will not be installable via OTA on any existing Pi** (their lib_download_artifacts will fail to verify the new firmware against the old pubkey shipped in their last installed release's deploy state).
+3. On each Pi, manually run `install-pi.sh` from the new release. This downloads the new pubkey directly and bootstraps fresh — no verification chain back to the lost key needed.
+4. Future OTAs work normally from that point.
+
+The recovery cost is one manual `install-pi.sh` run per Pi, which is acceptable for a personal-scale fleet. (Future hardening: pinned-on-first-install trust anchor would make this strictly impossible without physical access; for now, the trust model deliberately allows this recovery path.)
 
 ---
 
