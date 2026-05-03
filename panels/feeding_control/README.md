@@ -18,4 +18,4 @@ feeding_control/
 
 The `thread_panel` custom HA integration takes a YAML manifest ([ha/manifest.yaml](ha/manifest.yaml) is a template — paste into HA's config flow), forwards every declared HA entity over MQTT + UART to the panel, and dispatches any `call_service` the panel fires back. The panel shows real PetLibro entities from HA rather than replicating any petlibro-specific logic on-device.
 
-See [`../../docs/build_plan_v1.md`](../../docs/build_plan_v1.md) for current production state and architecture, and [`../../docs/build_plan_v2.md`](../../docs/build_plan_v2.md) for the active V2 work.
+See [`../../docs/build_plan_v1.md`](../../docs/build_plan_v1.md) for current production state and architecture, and [`../../docs/build_plan_v2/`](../../docs/build_plan_v2/) for the active V2 work.

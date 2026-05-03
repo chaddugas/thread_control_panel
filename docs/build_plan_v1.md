@@ -2,7 +2,7 @@
 
 > **Status: V1 shipped 2026-04-28.** End-to-end pipeline working: HA ↔ integration ↔ MQTT ↔ C6 ↔ Pi bridge ↔ kiosk. Auto-deploy on `cut-release`, boot-time resync, rotated-touch kiosk, schedule + manual-feed UI.
 >
-> **Active work has moved to [build_plan_v2.md](build_plan_v2.md).** This document is the historical record of V1 and the reference for current production state (MQTT topic schema, UART protocol, sensor wiring, panel-itself entity contract, etc.). V2 extends or supersedes specific pieces — see the V2 doc for what's changing. The "V2 / Post-V1 follow-ups" section below is preserved as the original wishlist; items that have been promoted into formal V2 phases are tracked in `build_plan_v2.md`.
+> **Active work has moved to [build_plan_v2/](build_plan_v2/).** This document is the historical record of V1 and the reference for current production state (MQTT topic schema, UART protocol, sensor wiring, panel-itself entity contract, etc.). V2 extends or supersedes specific pieces — see the V2 doc for what's changing. The "V2 / Post-V1 follow-ups" section below is preserved as the original wishlist; items that have been promoted into formal V2 phases are tracked in `build_plan_v2/`.
 
 The project is a **platform** for building no-WiFi Thread-based touchscreen control panels for Home Assistant, plus its **first product** (`feeding_control` — a pet feeder UI). This doc covers both: the platform-level work and the product-level work for `feeding_control`. Future products will get their own short product-specific docs and reference this one.
 
@@ -468,7 +468,7 @@ esp_mqtt_client_config_t mqtt_cfg = {
 
 Not blocking V1 ship, but called out so we don't lose them.
 
-> **Promoted to V2.** The items in this section have been carried into [build_plan_v2.md](build_plan_v2.md) as Steps 18–22 (organized by the same theme groupings). The V2 doc is the active source for these — edit there, not here. This section is preserved as the original wishlist for historical context.
+> **Promoted to V2.** The items in this section have been carried into [build_plan_v2/](build_plan_v2/) (split across [phase2_polish.md](build_plan_v2/phase2_polish.md) and [phase3_themed.md](build_plan_v2/phase3_themed.md), organized by the same theme groupings). The V2 docs are the active source for these — edit there, not here. This section is preserved as the original wishlist for historical context.
 
 ### Setup & deploy
 
@@ -520,7 +520,7 @@ Not blocking V1 ship, but called out so we don't lose them.
 
 ### Outstanding (V2)
 
-> **Promoted to V2.** The single item below has been consolidated into [build_plan_v2.md](build_plan_v2.md) Step 20 (NVS-provisioned per-device credentials), which addresses the same root issue. Edit there, not here.
+> **Promoted to V2.** The single item below has been consolidated into [build_plan_v2/phase1_security.md](build_plan_v2/phase1_security.md) Group A (NVS-provisioned credentials, shipped in beta.29), which addresses the same root issue. Edit there, not here.
 
 - MQTT credentials in sdkconfig (plaintext) — fine for V1's single device. `sdkconfig` is gitignored so they're not exposed, but every device built from this tree gets identical credentials. Move to NVS-provisioned per-device credentials before deploying a fleet.
 

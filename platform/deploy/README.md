@@ -47,7 +47,7 @@ curl -sSL https://github.com/chaddugas/thread_control_panel/releases/download/v2
 
 ### First time on a fresh Pi
 
-Until [Step 18](../../docs/build_plan_v2.md#step-18--setup--deploy-improvements) folds apt setup into `install-pi.sh`, you need to install the kiosk stack manually first:
+Until [the bootstrap-from-fresh-Pi-OS-Lite item](../../docs/build_plan_v2/phase3_themed.md#developer-ergonomics) folds apt setup into `install-pi.sh`, you need to install the kiosk stack manually first:
 
 ```bash
 sudo apt update

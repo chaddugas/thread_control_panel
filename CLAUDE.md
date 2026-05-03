@@ -7,7 +7,7 @@ A platform for building no-WiFi, Thread-based touchscreen control panels for Hom
 **Two build-plan docs:**
 
 - **[`docs/build_plan_v1.md`](docs/build_plan_v1.md)** — historical record of V1 (shipped 2026-04-28) and reference for current production state: MQTT topic schema, UART protocol, sensor wiring, panel-itself entity contract, lessons learned. Read this for context on how things currently work.
-- **[`docs/build_plan_v2.md`](docs/build_plan_v2.md)** — active work: artifact-based releases + HA-orchestrated remote updates. Read this for what's being built next.
+- **[`docs/build_plan_v2/`](docs/build_plan_v2/)** — active work, split into per-section files. Start at [`README.md`](docs/build_plan_v2/README.md) for status + navigation; the active phase is [`phase2_polish.md`](docs/build_plan_v2/phase2_polish.md), with cross-cutting notes (lessons / proven facts / tech debt) in [`notes.md`](docs/build_plan_v2/notes.md).
 
 Treat updating the active doc (v2) as part of every meaningful change — strike through finished steps with `✅ DONE`, move the `(next up)` marker, log learnings/invariants/debt in the existing sections. The "Keeping this current" section near the top of each doc spells out the convention. Edit v1 only when correcting historical inaccuracies, or when V2 has shipped a piece that supersedes a v1 invariant (mark the v1 section as superseded with a pointer to v2).
 
@@ -44,7 +44,7 @@ panels/feeding_control/         # first product
 
 ## How the user works
 
-- **Always read both build-plan docs first** ([v1](docs/build_plan_v1.md) for current state, [v2](docs/build_plan_v2.md) for active work). They capture decisions and rationale that don't appear elsewhere.
+- **Always read both build-plan docs first** ([v1](docs/build_plan_v1.md) for current state, [v2](docs/build_plan_v2/README.md) for active work). They capture decisions and rationale that don't appear elsewhere.
 - **Stop at "ready to build" on firmware work** — the user runs builds, flashes, and hardware-in-the-loop verification themselves. Don't auto-run `idf.py build/flash/monitor`.
 - **One focused step per message during debugging or hardware bring-up.** Bundling "try A, then B, then C" forces the user to either skip ahead blindly or stop mid-list. Wait for the result before proposing the next step.
 - **Use the `idf` shell alias** to enter the ESP-IDF v6.0 environment when builds are required (don't source the activate script directly).
@@ -63,7 +63,7 @@ panels/feeding_control/         # first product
 
 ## Lessons worth not re-discovering
 
-(See [`docs/build_plan_v1.md`](docs/build_plan_v1.md) for the full V1 list under each "Lessons Learned" section; V2 lessons accumulate in [`docs/build_plan_v2.md`](docs/build_plan_v2.md). Highlights:)
+(See [`docs/build_plan_v1.md`](docs/build_plan_v1.md) for the full V1 list under each "Lessons Learned" section; V2 lessons accumulate in [`docs/build_plan_v2/notes.md`](docs/build_plan_v2/notes.md). Highlights:)
 
 - **Floating UART RX = phantom bytes.** Garbled bytes appearing seconds after the last expected transmission, with nothing else on the bus, means the RX line isn't being driven (loose wire / cold solder joint). Truly disconnected line shows zero bytes; floating shows phantom bytes.
 - **TLS hostname in MQTT URI + AdGuard split-horizon DNS** is what makes IPv6-only Thread devices reachable over TLS. Embed ISRG Root X1 (not the leaf), override OpenThread's discovered DNS with AdGuard's ULA.
