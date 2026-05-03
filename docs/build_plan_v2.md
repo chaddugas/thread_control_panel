@@ -1,6 +1,6 @@
 # Thread Control Panel — Build Plan V2
 
-> **Status: V2 active.** Step 17 (Phases 1, 2, 3a, 3b) and Step 17b shipped — production runs v2.0.0-beta.28 with WiFi state surface, persistent journals, and HA-orchestrated remote updates. **Phase 1 — Security** is up next. See [build_plan_v1.md](build_plan_v1.md) for the V1 historical record + production-state reference.
+> **Status: V2 active.** Step 17 (Phases 1, 2, 3a, 3b), Step 17b, and Phase 1 (Security) shipped — production runs v2.0.0-beta.34 with HA-orchestrated remote updates, NVS-backed MQTT credentials, narrowed authorization surface, and ed25519-signed firmware. **Phase 2 — Polish & cleanup** is in flight (Group B closed in beta.34). See [build_plan_v1.md](build_plan_v1.md) for the V1 historical record + production-state reference.
 
 ## Table of contents
 
@@ -33,7 +33,7 @@ V2 development is active. **Phase 1 — Security closed in v2.0.0-beta.33.** Shi
 - **Phase 1 Group C**: authorization surface tightening — narrowed sudoers, removed wide-open NOPASSWD: ALL drop-in, kept wifi password out of recorder, fixed same-version OTA rejection ✅
 - **Phase 1 Group D**: OTA tamper-resistance — ed25519 firmware signing via minisign, sign in cut-release, verify in `lib_download_artifacts` ✅
 
-**In flight**: [Phase 2 — Polish & cleanup](#phase-2--polish--cleanup). Repo organization for multi-panel readiness, dead-code sweep, DRY pass, comment hygiene, foundational tests. After Phase 2: themed groups under [Phase 3+](#phase-3--themed-groups) (no strict ordering — pick whichever fits the moment).
+**In flight**: [Phase 2 — Polish & cleanup](#phase-2--polish--cleanup). Group B (dead code & file removal) closed in v2.0.0-beta.34. Remaining: Group A (repo organization for multi-panel readiness), Group C (DRY pass), Group D (comment hygiene), Group E (test foundation). After Phase 2: themed groups under [Phase 3+](#phase-3--themed-groups) (no strict ordering — pick whichever fits the moment).
 
 ## Keeping this current
 
@@ -233,11 +233,14 @@ No new features in this phase. Goal: well-organized, dead-code-free, DRYed, simp
 - Same treatment for `panels/<id>/ha/manifest.yaml` (becomes a manifest reference, no code).
 - Acceptance: dropping in a new panel = UI bundle + manifest + a few lines of config, zero firmware fork.
 
-### Group B: Dead code & file removal sweep
+### ~~Group B: Dead code & file removal sweep~~ ✅ DONE
 
-- Audit each top-level dir for unreferenced files. Known: V1 fallbacks (`tools/panel-ota` Thread-OTA path) superseded by V2 — flagged for removal once V2 is proven, which it now is.
-- Audit Python imports for unused, dead conditionals.
-- Remove HACS-validation workflow remnants if any remain.
+**Status (2026-05-02)**: Closed in v2.0.0-beta.34. Validated end-to-end: real OTA round-trip on the production panel exercised the V2 OTA path with the V1 Thread-OTA shim removed and completed cleanly through phase progression to `done` + `state/version` reporting beta.34. Build was clean (`idf.py build` had nothing to say about the dropped includes / requires).
+
+- ✅ **V1 Thread-OTA path removed** (90ce900): `tools/panel-ota` Mac CLI deleted; `panel_app.c` lost ~230 lines (`esp_http_client.h` / `esp_ota_ops.h` / `esp_partition.h` includes, `s_ota_active` flag and the two MQTT-publish gates that ORed it with `panel_ota_uart_is_active()`, `download_ota_image()`, V1 `ota_task()`, `handle_ota_command()`, the `cmd/ota` subscribe and dispatch); `panel_config.h` lost `PANEL_TOPIC_CMD_OTA`; `main/CMakeLists.txt` lost `esp_http_client` (V1-only) and `app_update` (V2's panel_ota_uart.c still requires it via `panel_platform`'s PRIV_REQUIRES, where it correctly lives) from main's PRIV_REQUIRES.
+- ✅ **Python unused-import audit via ruff** (post-beta.34): 7 findings total — 2 real (unused `import os` in `platform/diagnostics/touch_test.py`, unused `from typing import Any` in `platform/integration/thread_panel/select.py`) + 5 false positives in `tools/thread_panel_dump.py` (pyscript runtime globals like `service`, `hass`, `log`; suppressed file-wide via `# ruff: noqa: F821`). All cleared; `ruff check platform/ tools/thread_panel_dump.py` returns "All checks passed!".
+- ✅ **HACS-validation workflow remnants confirmed gone**: `.github/workflows/` directory doesn't exist on disk (workflow was removed in beta.23 per Step 17 Phase 3b validation note 3).
+- ✅ **Hygiene cleanups landed alongside** (90ce900): dead `panels/feeding_control/firmware/sdkconfig.ci.{cli,disable_cli,ext_coex}` (leftovers from the original ot_cli example fork; ESP-IDF's `idf_build_apps` would auto-discover them for matrix builds, but cut-release runs locally on the Mac so they were doing nothing); `tools/thread_panel_dump.py`'s stale "Future (v2)" header note about migrating into the integration as a service.
 
 ### Group C: DRY + simplification pass
 
@@ -748,6 +751,8 @@ Convention chosen over a two-stage flow (release-type then bump) because it matc
 - **Bridge spawns `/opt/panel/current/deploy/panel-update.sh` at request time, which is the OLD version's script — the symlink swap to the new version happens partway through.** Practical implication: any change to `panel-update.sh` only takes effect on the OTA *after* the one that installs it. To validate a fix to `panel-update.sh`, you need two OTAs: cut N → trigger OTA, then cut N+1 → trigger OTA. The first one installs the fix, the second one runs it. C6-firmware fixes don't have this delay because the C6 is already running the firmware that handles the post-flash reboot.
 
 - **Commit subject scope prefixes should be unambiguous in any rendering context.** Commits prefixed `update entity:` were displayed as bullet points inside HA's update entity dialog (auto-generated release notes), where they read as if HA was announcing something about the entity itself. Use file/class names (`PanelUpdateEntity:`, `update.py:`, `panel_app.c:`) over loose noun phrases for any future scope prefix.
+
+- **Don't gitignore paths that `tools/cut-release` `git add`s.** The off-main HACS-layout commit does `git add custom_components/` to stage the integration mirror; if that path is gitignored, `git add` silently drops everything, the next `git commit` fails with "nothing to commit", and cut-release bails after the version-bump has already landed on main. Caught when an attempt to quiet the leftover-`custom_components/` working-tree noise via `.gitignore` killed the beta.34 cut. Replacement: `rm -rf "$repo_root/custom_components"` at the end of cut-release's success path (alongside the existing `rm -rf "$staging"`); the failure paths already cleaned up, so the success path was the only gap that left the directory between releases.
 
 ## Proven Facts
 

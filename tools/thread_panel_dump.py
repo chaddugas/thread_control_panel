@@ -26,6 +26,11 @@ Call (Developer Tools -> Actions):
   Tick "Return response data" — the dump comes back inline.
 """
 
+# pyscript injects `service`, `hass`, `log`, etc. as runtime globals; static
+# checkers can't see them, so suppress F821 file-wide rather than scattering
+# per-line noqas across every reference.
+# ruff: noqa: F821
+
 
 def _coerce(value):
     """Coerce HA state values to JSON-serializable shapes."""

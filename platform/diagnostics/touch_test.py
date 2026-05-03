@@ -3,7 +3,6 @@
 Waveshare 6.25" touch test — direct framebuffer + evdev.
 Writes RGB565 to /dev/fb0. Ctrl+C to exit.
 """
-import os
 import sys
 import threading
 import queue

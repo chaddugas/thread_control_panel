@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
 
 from homeassistant.components import mqtt
 from homeassistant.components.select import SelectEntity
