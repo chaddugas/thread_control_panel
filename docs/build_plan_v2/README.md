@@ -9,6 +9,7 @@
 | [overview.md](overview.md) | Goals, non-goals, V2 end-state architecture |
 | [phase1_security.md](phase1_security.md) | **Closed.** Group A–D: NVS creds, password rotation, sudoers tightening, ed25519 firmware signing |
 | [phase2_polish.md](phase2_polish.md) | **Active.** Group A (multi-panel) / B ✅ DONE / C (DRY) / D (comments) / E (tests) |
+| [phase2_groupA_multipanel.md](phase2_groupA_multipanel.md) | Group A design doc: hardware abstraction, panel.toml, codegen, capability discovery, A.1/A.2/A.3 sub-phases |
 | [phase3_themed.md](phase3_themed.md) | Backlog organized by theme — quality of life, robustness, HA UX, hardware, dev ergonomics, multi-device |
 | [future_panels.md](future_panels.md) | Idea track for panels 2 + 3 |
 | [completed_steps.md](completed_steps.md) | Historical detail for Step 17 (Phases 1, 2, 3a, 3b) and Step 17b |

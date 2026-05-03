@@ -4,9 +4,15 @@ No new features in this phase. Goal: well-organized, dead-code-free, DRYed, simp
 
 ## Group A: Repo organization + multi-panel prep
 
-- Move `panels/<id>/firmware/main/panel_app.c` shim contents into `platform/firmware/` driven by config. End state: `panels/<id>/` contains a UI directory + manifest + small config snippet only.
-- Same treatment for `panels/<id>/ha/manifest.yaml` (becomes a manifest reference, no code).
-- Acceptance: dropping in a new panel = UI bundle + manifest + a few lines of config, zero firmware fork.
+**Design**: see [phase2_groupA_multipanel.md](phase2_groupA_multipanel.md) for the full A.1 / A.2 / A.3 sub-phase breakdown, panel.toml schema, codegen tool design, capability discovery wire format, and validation plan.
+
+Original v2-doc bullets, scope-expanded by the May 2026 design discussion to cover Pi model + display type/driver + sensor presence/type + MCU target + per-panel HA entity gating + integration release-train split:
+
+- **A.1**: Integration release train splits off (cut-release sha-compares the integration vs previous release, doesn't bump `manifest.json` version on no-change → no HACS prompt) **+** per-Pi panel identity (`/opt/panel/panel_id` written at install time, install-lib.sh downloads only that panel's artifacts).
+- **A.2**: `panels/<id>/panel.toml` as single source of truth for hardware/build/capability config; codegen produces `panel_config.h` + `sdkconfig.defaults`; firmware platform/product split (panel_app.c shim shrinks); sensor optional via `#ifdef`; lidar driver parameterized for Benewake-family compatibility (TF-Mini Plus / TF-Luna / TF-Nova share a UART protocol); MCU target switching (ESP32-C6 vs ESP32-H2 via `idf.py set-target`); bridge publishes `state/_capabilities` retained, integration consumes for entity gating; `panels/<id>/ha/manifest.yaml` deleted (it's a stale reference template, not actually loaded — the YAML manifest is pasted into HA's config flow at panel onboarding).
+- **A.3**: Pi-side install templating from `panel.toml` — per-display-type `/boot/firmware/config.txt` snippets (HDMI / DSI / DPI), console framebuffer rotation, sway output transform. Lands just-in-time when panel 2 or 3 is being deployed.
+
+Acceptance: dropping in a new panel = `panels/<new_id>/{panel.toml, ui/, README.md}` + a couple of HA-side config-entry steps. Zero firmware fork. Zero install-script fork. Zero integration code changes.
 
 ## ~~Group B: Dead code & file removal sweep~~ ✅ DONE
 
