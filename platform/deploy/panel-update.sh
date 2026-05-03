@@ -215,6 +215,20 @@ PREV_TARGET=""
 # shellcheck source=install-lib.sh
 source "$PANEL_ROOT/current/deploy/install-lib.sh" || fail "install-lib.sh missing or unreadable"
 
+# Per-panel artifact selection. install-lib's lib_manifest_artifacts +
+# lib_extract_artifacts read $PANEL_ID to pull only this panel's
+# firmware + UI bundle. /opt/panel/panel_id is seeded by install-pi.sh
+# at first install; missing here means the Pi is still on a pre-A.1.b
+# layout — fail with a clear remediation step rather than silently
+# defaulting (which could mask a real misconfiguration on a multi-panel
+# fleet). One-time fix: `echo feeding_control > /opt/panel/panel_id`
+# (or run install-pi.sh from the new release once).
+if [ ! -f "$PANEL_ROOT/panel_id" ]; then
+    fail "$PANEL_ROOT/panel_id missing — re-run install-pi.sh from this release once to seed it (or echo feeding_control > $PANEL_ROOT/panel_id)"
+fi
+PANEL_ID=$(tr -d '[:space:]' < "$PANEL_ROOT/panel_id")
+export PANEL_ID
+
 # Resolve target version BEFORE creating staging dirs so VERSION is set
 publish_status "resolving_version" "$TARGET_VERSION"
 VERSION=$(lib_resolve_version "$TARGET_VERSION")

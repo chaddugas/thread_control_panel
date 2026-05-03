@@ -69,33 +69,52 @@ PanelUpdateEntity (the firmware/UI/bridge prompt) keeps working off the release 
 - Cut a release immediately after a no-integration-change commit (e.g. a tools/cut-release tweak); confirm the confirm message says "integration content unchanged" and HACS doesn't prompt for an update after the release.
 - Then make any integration change (touch `platform/integration/thread_panel/__init__.py`, even a whitespace edit) and cut another release; confirm the confirm message does NOT say "unchanged" and HACS does prompt.
 
-### A.1.b — Per-Pi panel identity + selective artifact download
+### ~~A.1.b — Per-Pi panel identity + selective artifact download~~ ✅ DONE
+
+**Status (2026-05-03)**: Shipped as `PANEL_ID` env var threaded through install-lib.sh + install-pi.sh + panel-update.sh; `/opt/panel/panel_id` is the on-disk source of truth. Bash syntax-checked clean; manifest parser dry-run against live beta.34 manifest confirms correct panel extraction (`feeding_control`). Acceptance test deferred to next release cut.
 
 **Goal**: each Pi knows which panel it is, downloads only its panel's artifacts.
 
-**Mechanism**:
+**Mechanism (as implemented)**:
 
-1. **`/opt/panel/panel_id`** — a single-line file containing the panel id (e.g. `feeding_control`). Owned by install user, mode 0644 (not secret).
-2. **install-pi.sh** prompts for `panel_id` if the file doesn't exist, defaulting to `feeding_control` for back-compat with the existing single-panel install. Validates against the manifest's `panels` keys (rejects unknown ids).
-3. **install-lib.sh's `lib_download_artifacts`**: reads `/opt/panel/panel_id`, derives the artifact filenames (`<panel_id>-firmware-<v>.bin`, `<panel_id>-ui-<v>.tar.gz`), downloads only those. Shared artifacts (panel-bridge, panel-deploy, integration zip) are unchanged.
-4. **`lib_extract_artifacts`** extracts the per-panel UI to `/opt/panel/versions/<v>/ui-dist/` and the firmware to `/opt/panel/versions/<v>/firmware.bin` — same paths as today, no service config changes needed.
+1. **`/opt/panel/panel_id`** — a single-line file containing the panel id (e.g. `feeding_control`). Owned by install user, mode 0644 (not secret). Whitespace stripped on read (defensive against trailing newlines from manual edits).
+2. **install-pi.sh**:
+   - After downloading `manifest.json`, extracts the available panels list.
+   - If `/opt/panel/panel_id` already exists: validates its content against the manifest's panels. **Hard-fails with a remediation message if the existing value isn't in the current manifest** (e.g. a future release renamed the panel) — better than silently 404-ing on the artifact download.
+   - If absent (first install): prompts with the available panels listed, defaulting to `feeding_control` for back-compat with V1 single-panel installs (or first alphabetically if `feeding_control` isn't in the manifest). Atomic write (mktemp + chmod + rename).
+   - All `read` calls use `</dev/tty` so the prompt works regardless of stdin source — script may be run via `curl | bash` where stdin = script body.
+   - Sets `export PANEL_ID` so install-lib.sh's functions see it.
+3. **install-lib.sh's `lib_manifest_artifacts`**: filtered to `panels[$PANEL_ID]` (vs. looping every panel as today). Hard-fails if `$PANEL_ID` isn't in the manifest's `panels` map, listing what IS available.
+4. **`lib_extract_artifacts`**: globs use `${PANEL_ID}-firmware-*.bin` / `${PANEL_ID}-ui-*.tar.gz` rather than the previous `*-firmware-*.bin` / `*-ui-*.tar.gz` wildcards. Belt-and-suspenders against any future stray file in `$STAGING`.
+5. **panel-update.sh**: reads `/opt/panel/panel_id` and exports `PANEL_ID` after sourcing install-lib.sh. Hard-fails with a one-time-fix instruction if the file is missing (`echo feeding_control > /opt/panel/panel_id`, or re-run install-pi.sh).
+
+Doc block at the top of install-lib.sh updated to list `PANEL_ID` as a required env var alongside `PANEL_ROOT`, `REPO`, etc.
 
 **Files touched**:
-- `platform/deploy/install-pi.sh` — add panel_id prompt + write to /opt/panel/panel_id
-- `platform/deploy/install-lib.sh` — read panel_id, parameterize artifact URL derivation in `lib_download_artifacts` and `lib_extract_artifacts`
-- `platform/deploy/panel-update.sh` — sources install-lib.sh, transparently inherits the panel-aware behavior
+- `platform/deploy/install-pi.sh`
+- `platform/deploy/install-lib.sh`
+- `platform/deploy/panel-update.sh`
 
 The release manifest is already per-panel-keyed (`{"panels": {"feeding_control": {"firmware": {...}, "ui": {...}}}}`), so the script changes are surgical lookups against existing structure.
 
-**Validation**: production Pi runs install-pi.sh from the new beta → prompted for panel_id (defaults to `feeding_control`) → /opt/panel/panel_id exists → install completes pulling only feeding_control artifacts → diff total bytes downloaded vs. previous beta to confirm shared bits are unchanged and per-panel bits are panel-only.
+**Migration on existing Pis**: a Pi running pre-A.1.b has no `/opt/panel/panel_id`. First OTA after A.1.b ships still uses the OLD panel-update.sh (per the spawn-at-request-time gotcha), which doesn't know about `PANEL_ID` and works as today. After that OTA installs the NEW panel-update.sh, the user must run install-pi.sh once (or `echo feeding_control > /opt/panel/panel_id`) before the NEXT OTA, otherwise it hard-fails. Strict-fail chosen over "default to feeding_control silently" because silent assumptions on a multi-panel fleet would mask real misconfigurations.
+
+**Bundled fix (opportunistic, same file)**: install-pi.sh's existing MQTT-credentials prompts (`mqtt_user`, `mqtt_pass`, `mqtt_pass_confirm`) also got `</dev/tty` redirects, closing the [curl|bash silent-fail Robustness item](phase3_themed.md#robustness--correctness). Same fix pattern as the new panel_id prompt; while in the file.
+
+**Validation plan** — at next beta from the production Pi:
+- Run install-pi.sh from the new release on the production Pi (which doesn't yet have `/opt/panel/panel_id`).
+- Expected: panel_id prompt appears, defaults to `feeding_control`, accept the default → file written.
+- Expected: install completes pulling only `feeding_control-*` per-panel artifacts (vs. all panels' if there were more — currently single-panel so byte-count is identical to today).
+- Expected: subsequent re-runs of install-pi.sh detect existing file, no prompt.
+- Trigger an OTA from HA: panel-update.sh reads the file, OTA proceeds normally.
 
 ### A.1 commits estimate
 
 3 commits, one beta:
 
 1. ~~cut-release: sha-compare integration vs previous release, conditional version bump.~~ ✅ DONE 2026-05-03.
-2. install-pi.sh + install-lib.sh: panel_id prompt + selective artifact download.
-3. README/docs updates if needed.
+2. ~~install-pi.sh + install-lib.sh + panel-update.sh: panel_id prompt + selective artifact download.~~ ✅ DONE 2026-05-03.
+3. README/docs updates if needed (deferred until validated end-to-end on the production Pi).
 
 ---
 

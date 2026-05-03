@@ -4,6 +4,9 @@
 #
 # Functions assume the caller has set:
 #   PANEL_ROOT     — typically /opt/panel
+#   PANEL_ID       — which panel this Pi is (e.g. feeding_control); seeded
+#                    by install-pi.sh into /opt/panel/panel_id and exported
+#                    by both callers. Drives per-panel artifact selection.
 #   REPO           — github org/repo, e.g. chaddugas/thread_control_panel
 #   INSTALL_USER   — the user that runs the services (templated into units)
 #   STAGING        — temp dir for downloads (caller creates + cleans up)
@@ -32,18 +35,27 @@ lib_download_manifest() {
 }
 
 # Emit "filename sha256" pairs for every Pi-side artifact in the manifest
-# (skips the integration zip — that's HACS-side, not ours).
+# (skips the integration zip — that's HACS-side, not ours). Per-panel
+# artifacts are filtered to $PANEL_ID; non-matching panels are skipped so
+# a Pi never downloads firmware/UI for panels it isn't.
 lib_manifest_artifacts() {
-    python3 - "$STAGING/manifest.json" <<'PY'
+    python3 - "$STAGING/manifest.json" "$PANEL_ID" <<'PY'
 import json, sys
-m = json.load(open(sys.argv[1]))
+manifest_path, panel_id = sys.argv[1], sys.argv[2]
+m = json.load(open(manifest_path))
 for name, meta in m.get("components", {}).items():
     if name == "integration":
         continue  # HACS-side, not Pi-side
     print(f"{meta['filename']} {meta['sha256']}")
-for panel_id, comps in m.get("panels", {}).items():
-    for cname, meta in comps.items():
-        print(f"{meta['filename']} {meta['sha256']}")
+panels = m.get("panels", {})
+if panel_id not in panels:
+    sys.stderr.write(
+        f"install-lib: panel_id '{panel_id}' not in release manifest. "
+        f"Available: {sorted(panels)}\n"
+    )
+    sys.exit(1)
+for cname, meta in panels[panel_id].items():
+    print(f"{meta['filename']} {meta['sha256']}")
 PY
 }
 
@@ -126,16 +138,17 @@ lib_extract_artifacts() {
     [ -n "$deploy_tar" ] || { echo "install-lib: deploy tarball missing" >&2; return 1; }
     tar -xzf "$deploy_tar" -C "$VERSION_DIR/deploy"
 
-    # Currently single-panel; if multiple UI tarballs ever ship, this will
-    # need to know which panel to install. For now: take the only one.
+    # Per-panel UI + firmware. lib_manifest_artifacts already filtered the
+    # download set to $PANEL_ID's artifacts, so the panel-specific glob is
+    # belt-and-suspenders against any future stray file in $STAGING.
     local ui_tar
-    ui_tar=$(find "$STAGING" -maxdepth 1 -name '*-ui-*.tar.gz' | head -n1)
-    [ -n "$ui_tar" ] || { echo "install-lib: UI tarball missing" >&2; return 1; }
+    ui_tar=$(find "$STAGING" -maxdepth 1 -name "${PANEL_ID}-ui-*.tar.gz" | head -n1)
+    [ -n "$ui_tar" ] || { echo "install-lib: ${PANEL_ID} UI tarball missing in $STAGING" >&2; return 1; }
     tar -xzf "$ui_tar" -C "$VERSION_DIR/ui-dist"
 
     local firmware_bin
-    firmware_bin=$(find "$STAGING" -maxdepth 1 -name '*-firmware-*.bin' | head -n1)
-    [ -n "$firmware_bin" ] || { echo "install-lib: firmware bin missing" >&2; return 1; }
+    firmware_bin=$(find "$STAGING" -maxdepth 1 -name "${PANEL_ID}-firmware-*.bin" | head -n1)
+    [ -n "$firmware_bin" ] || { echo "install-lib: ${PANEL_ID} firmware bin missing in $STAGING" >&2; return 1; }
     cp "$firmware_bin" "$VERSION_DIR/firmware.bin"
 
     cp "$STAGING/manifest.json" "$VERSION_DIR/manifest.json"

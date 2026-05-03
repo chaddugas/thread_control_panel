@@ -96,6 +96,77 @@ echo "→ Downloading manifest.json..."
 curl -fsSL -o "$STAGING/manifest.json" \
     "https://github.com/$REPO/releases/download/$VERSION/manifest.json"
 
+# ===== panel identity =====
+#
+# Each Pi knows which panel it serves via /opt/panel/panel_id (single
+# line, panel_id string, mode 0644 — not secret). install-lib.sh's
+# lib_manifest_artifacts + lib_extract_artifacts read $PANEL_ID to
+# download / extract only that panel's firmware + UI bundle; shared
+# artifacts (bridge, deploy) are panel-agnostic. Without this every Pi
+# would pull every panel's artifacts on every release.
+#
+# Re-run on an already-bootstrapped Pi: trust + validate the existing
+# file. First install: prompt with the manifest's panels as options,
+# defaulting to feeding_control for back-compat with V1 single-panel.
+
+AVAILABLE_PANELS=$(python3 - "$STAGING/manifest.json" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+for p in sorted(m.get("panels", {})):
+    print(p)
+PY
+)
+
+if [ -z "$AVAILABLE_PANELS" ]; then
+    echo "install-pi.sh: $VERSION manifest contains no panels — refusing to install" >&2
+    exit 1
+fi
+
+if [ -f "$PANEL_ROOT/panel_id" ]; then
+    PANEL_ID=$(tr -d '[:space:]' < "$PANEL_ROOT/panel_id")
+    if ! echo "$AVAILABLE_PANELS" | grep -qx "$PANEL_ID"; then
+        echo "install-pi.sh: existing $PANEL_ROOT/panel_id contains '$PANEL_ID', not in $VERSION's manifest." >&2
+        echo "  Available panels in this release:" >&2
+        echo "$AVAILABLE_PANELS" | sed 's/^/    - /' >&2
+        echo "  Either fix the file (echo <panel_id> > $PANEL_ROOT/panel_id) or delete it to re-prompt." >&2
+        exit 1
+    fi
+    echo "→ Panel identity: $PANEL_ID (from $PANEL_ROOT/panel_id)"
+else
+    echo "→ Configuring panel identity..."
+    echo "  This Pi serves a single panel; the panel_id determines which"
+    echo "  firmware + UI bundle gets downloaded on each install/update."
+    echo "  Stored in $PANEL_ROOT/panel_id (mode 0644)."
+    echo
+    echo "  Available panels in $VERSION:"
+    echo "$AVAILABLE_PANELS" | sed 's/^/    - /'
+    echo
+    # Default to feeding_control if available (back-compat with V1
+    # single-panel installs); otherwise first alphabetically.
+    DEFAULT_PANEL_ID="feeding_control"
+    if ! echo "$AVAILABLE_PANELS" | grep -qx "$DEFAULT_PANEL_ID"; then
+        DEFAULT_PANEL_ID=$(echo "$AVAILABLE_PANELS" | head -n1)
+    fi
+    while true; do
+        # </dev/tty so the prompt works regardless of stdin source —
+        # script may be run via `curl | bash` where stdin = script body.
+        read -r -p "  panel_id [$DEFAULT_PANEL_ID]: " PANEL_ID </dev/tty
+        PANEL_ID="${PANEL_ID:-$DEFAULT_PANEL_ID}"
+        if echo "$AVAILABLE_PANELS" | grep -qx "$PANEL_ID"; then
+            break
+        fi
+        echo "    × '$PANEL_ID' is not in this release's manifest. Pick from above."
+    done
+    # Atomic write: temp file + rename. mode 0644 — panel_id is not
+    # secret, just identity, but keep it tidy.
+    tmp_file=$(mktemp "$PANEL_ROOT/panel_id.XXXXXX")
+    echo "$PANEL_ID" > "$tmp_file"
+    chmod 0644 "$tmp_file"
+    mv "$tmp_file" "$PANEL_ROOT/panel_id"
+    echo "  ✓ Wrote $PANEL_ROOT/panel_id = $PANEL_ID"
+fi
+export PANEL_ID
+
 echo "→ Bootstrapping helper library..."
 DEPLOY_TAR_NAME=$(python3 - "$STAGING/manifest.json" <<'PY'
 import json, sys
@@ -270,7 +341,9 @@ else
     # that doesn't handle escapes.
 
     while true; do
-        read -r -p "  MQTT username: " mqtt_user
+        # </dev/tty so the prompt works regardless of stdin source —
+        # script may be run via `curl | bash` where stdin = script body.
+        read -r -p "  MQTT username: " mqtt_user </dev/tty
         if [ -z "$mqtt_user" ]; then
             echo "    × username can't be empty"
             continue
@@ -293,7 +366,7 @@ else
     done
 
     while true; do
-        read -r -s -p "  MQTT password (12-128 chars, 2 of {letters, digits, symbols}): " mqtt_pass
+        read -r -s -p "  MQTT password (12-128 chars, 2 of {letters, digits, symbols}): " mqtt_pass </dev/tty
         echo
         if [ "${#mqtt_pass}" -lt 12 ]; then
             echo "    × password min length is 12"
@@ -322,7 +395,7 @@ else
             echo "    × must contain at least 2 of {letters, digits, symbols}"
             continue
         fi
-        read -r -s -p "  Confirm password: " mqtt_pass_confirm
+        read -r -s -p "  Confirm password: " mqtt_pass_confirm </dev/tty
         echo
         if [ "$mqtt_pass" != "$mqtt_pass_confirm" ]; then
             echo "    × passwords don't match"
