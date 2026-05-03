@@ -48,7 +48,9 @@ PY
 }
 
 # Download every Pi-side artifact into $STAGING and verify its sha256.
-# Returns non-zero on first mismatch.
+# Returns non-zero on first mismatch. Also runs lib_verify_firmware_signature
+# at the end — sha256 covers transit corruption, signature covers
+# authenticity (Group D).
 lib_download_artifacts() {
     local filename expected_sha actual_sha
     while IFS=' ' read -r filename expected_sha; do
@@ -64,6 +66,48 @@ lib_download_artifacts() {
             return 1
         fi
     done < <(lib_manifest_artifacts)
+
+    lib_verify_firmware_signature || return 1
+}
+
+# Download the per-release public key + each firmware's .minisig, then
+# verify with `minisign -V`. Pubkey is a top-level artifact (not in
+# manifest.json) — it's the trust anchor for that release's signing, and
+# direct download avoids a chicken-and-egg with the deploy tarball not yet
+# being extracted at this point. Convention: every <panel>-firmware-*.bin
+# has a sibling .minisig in the same release.
+lib_verify_firmware_signature() {
+    if ! command -v minisign >/dev/null 2>&1; then
+        echo "install-lib: minisign not installed — required for firmware signature verification (apt install minisign)" >&2
+        return 1
+    fi
+
+    local pubkey="$STAGING/firmware-signing.pub"
+    if [ ! -f "$pubkey" ]; then
+        echo "    firmware-signing.pub"
+        curl -fsSL -o "$pubkey" \
+            "https://github.com/$REPO/releases/download/$VERSION/firmware-signing.pub" \
+            || { echo "install-lib: failed to download firmware-signing.pub" >&2; return 1; }
+    fi
+
+    local firmware_bin sig
+    for firmware_bin in "$STAGING"/*-firmware-*.bin; do
+        [ -f "$firmware_bin" ] || continue
+        sig="${firmware_bin}.minisig"
+        if [ ! -f "$sig" ]; then
+            echo "    $(basename "$sig")"
+            curl -fsSL -o "$sig" \
+                "https://github.com/$REPO/releases/download/$VERSION/$(basename "$sig")" \
+                || { echo "install-lib: failed to download $(basename "$sig")" >&2; return 1; }
+        fi
+        echo "    verifying signature: $(basename "$firmware_bin")"
+        if ! minisign -V -p "$pubkey" -m "$firmware_bin" -q >/dev/null 2>&1; then
+            echo "install-lib: minisign verification FAILED for $(basename "$firmware_bin")" >&2
+            echo "  pubkey: $pubkey" >&2
+            echo "  signature: $sig" >&2
+            return 1
+        fi
+    done
 }
 
 # Extract the downloaded artifacts into $VERSION_DIR. Wipes $VERSION_DIR

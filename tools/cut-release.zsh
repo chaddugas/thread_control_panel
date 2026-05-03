@@ -459,12 +459,27 @@ PY
       # inside function bodies in zsh, so invoke through the explicit
       # python+script path (same approach as the user's `idf` zsh function).
       ( cd "$firmware_dir" && "$IDF_PYTHON_ENV_PATH/bin/python" "$IDF_PATH/tools/idf.py" build ) || return 1
-      local project_name bin_path
+      local project_name bin_path fw_staged signing_key
       project_name=$(_cr_firmware_project_name "$firmware_dir")
       [[ -n "$project_name" ]] || { print -u2 "cut-release: couldn't read project_name from $firmware_dir/build/project_description.json"; return 1 }
       bin_path="$firmware_dir/build/${project_name}.bin"
       [[ -f "$bin_path" ]] || { print -u2 "cut-release: firmware bin not found at $bin_path"; return 1 }
-      cp "$bin_path" "$staging/${panel_id}-firmware-${bare_version}.bin" || return 1
+      fw_staged="$staging/${panel_id}-firmware-${bare_version}.bin"
+      cp "$bin_path" "$fw_staged" || return 1
+
+      # Sign firmware.bin with minisign. The signature ships as a sibling
+      # release artifact; install-lib.sh's lib_download_artifacts verifies
+      # it against the bundled public key before extract. Aborts the
+      # release if the key is missing or signing fails — better to fail
+      # at cut-time than ship an unsigned firmware that the Pi will
+      # refuse to install.
+      print "→ ${panel_id} firmware signature..."
+      signing_key="${PANEL_SIGNING_KEY:-$HOME/.config/thread_control_panel/firmware-signing.key}"
+      [[ -f "$signing_key" ]] || { print -u2 "cut-release: signing key not found at $signing_key (set PANEL_SIGNING_KEY to override)"; return 1 }
+      command -v minisign >/dev/null 2>&1 || { print -u2 "cut-release: minisign not installed (brew install minisign)"; return 1 }
+      minisign -S -s "$signing_key" -m "$fw_staged" \
+        -t "${panel_id} firmware ${new_version}" >/dev/null \
+        || { print -u2 "cut-release: minisign sign failed for $fw_staged"; return 1 }
     fi
   done
 
@@ -543,6 +558,14 @@ PY
   _cr_substitute_repo "$staging/install-pi.sh" "$gh_repo" || return 1
   chmod +x "$staging/install-pi.sh"
 
+  # firmware-signing.pub shipped loose at the release root so install-lib.sh
+  # can download it directly during lib_download_artifacts (before any
+  # tarball is extracted). Trust anchor for that release's firmware.bin
+  # signature — see Group D.
+  print ""
+  print "→ firmware-signing.pub..."
+  cp "$repo_root/platform/deploy/firmware-signing.pub" "$staging/firmware-signing.pub" || return 1
+
   # ----- manifest.json -----
   print ""
   print "→ manifest.json..."
@@ -572,6 +595,14 @@ for f in sorted(sd.iterdir()):
     # Per-panel: <panel_id>-firmware-<v>.bin or <panel_id>-ui-<v>.tar.gz
     if name == "install-pi.sh":
         # Loose bootstrap, not a versioned component — skip
+        continue
+    if name == "firmware-signing.pub":
+        # Trust anchor — top-level artifact downloaded directly by
+        # install-lib.sh, not via manifest dispatch.
+        continue
+    if name.endswith(".minisig"):
+        # Sibling of the .bin it signs; convention <file>.minisig lets
+        # install-lib.sh find it without a manifest entry.
         continue
     if name.startswith("panel-bridge-"):
         components["bridge"] = meta(f)
@@ -653,8 +684,9 @@ PY
   local gh_args=("$new_version" "--title" "$new_version" "--notes-file" "$notes_file")
   (( is_prerelease )) && gh_args+=("--prerelease")
   if ! gh release create "${gh_args[@]}" \
-    "$staging"/*.bin "$staging"/*.tar.gz "$staging"/*.zip \
-    "$staging/manifest.json" "$staging/install-pi.sh"; then
+    "$staging"/*.bin "$staging"/*.minisig "$staging"/*.tar.gz "$staging"/*.zip \
+    "$staging/manifest.json" "$staging/install-pi.sh" \
+    "$staging/firmware-signing.pub"; then
     print ""
     print -u2 "cut-release: gh release create failed."
     print ""

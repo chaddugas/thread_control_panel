@@ -72,6 +72,20 @@ mkdir -p "$PANEL_ROOT/versions"
 rm -rf "$STAGING"
 mkdir -p "$STAGING"
 
+# ===== ensure minisign is installed =====
+#
+# install-lib.sh's lib_download_artifacts uses minisign to verify the
+# firmware.bin signature against the bundled public key (Group D, OTA
+# tamper-resistance). Idempotent via dpkg — only installs if missing.
+# Done before any artifact download so a missing tool fails before we've
+# touched the network heavily.
+
+if ! dpkg -l minisign >/dev/null 2>&1; then
+    echo "→ Installing minisign for firmware signature verification..."
+    sudo apt update
+    sudo apt install -y --no-install-recommends minisign
+fi
+
 # ===== bootstrap the helper lib =====
 #
 # We download manifest.json + the deploy tarball first, extract just enough
