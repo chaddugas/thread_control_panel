@@ -1,3 +1,5 @@
+[Build Plan V2](README.md) › Future / new panel ideas
+
 # Future / new panel ideas
 
 Idea-track items, not yet scheduled. They'll likely act as hardness tests for V2 and provide feature ideas for V3. When either gets scheduled, it triggers the [multi-device support](phase3_themed.md#multi-device-support-triggered-by-panel-2-actually-existing) group above.

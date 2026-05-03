@@ -1,3 +1,5 @@
+[Build Plan V2](README.md) › Notes
+
 # Notes — Lessons Learned, Proven Facts, Technical Debt
 
 Cross-cutting accumulators. Add to these as work happens; don't tie to a specific phase.

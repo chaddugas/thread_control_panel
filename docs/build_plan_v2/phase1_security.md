@@ -1,3 +1,5 @@
+[Build Plan V2](README.md) › Phase 1 — Security
+
 # Phase 1 — Security ✅ CLOSED
 
 The MQTT broker password is published in every `firmware.bin` release artifact and trivially extractable with `strings`. Phase 1 closes that hole, rotates the leaked credential, and tightens the surrounding authorization surface so a future leak has less reach.

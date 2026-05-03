@@ -43,7 +43,7 @@ venv/
 # Local-only IDE settings (the IDE-shared ones are committed under .vscode/)
 .vscode/*.local
 .vscode/launch.json
-
+.claude/**
 # Local commit-message scratch file (Claude populates with draft messages
 # after finishing a chunk of work; user reviews/edits before committing).
 # Set `git config commit.template <repo-path>/.gitmessage.txt` to use.

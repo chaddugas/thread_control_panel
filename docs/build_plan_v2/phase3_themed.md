@@ -1,3 +1,5 @@
+[Build Plan V2](README.md) › Phase 3+ — Themed groups
+
 # Phase 3+ — Themed groups
 
 Named groups, no strict ordering. Pick whichever fits the moment when each becomes the right time.
@@ -27,13 +29,13 @@ Named groups, no strict ordering. Pick whichever fits the moment when each becom
 
 - Replace YAML-paste manifest with a real config flow (interactive entity picker, multi-select, attribute allowlists).
 - "Unconfigured panel" splash in `platform/ui-core` (friendly setup-instructions screen instead of blank/directory listing).
-- Configurable presence/theme thresholds via HA `number` entities (replaces `.env.production` constants — tune without rebuilding).
+- Tunable behavioral values surfaced as HA `number` entities — see [A.2.g](phase2_groupA_multipanel.md#a2g--tunable-values-surface-as-ha-entities-not-paneltoml) for the mechanism. Initial set ships in A.2 itself (lidar_publish_hz, ambient_publish_period_s, ambient_mv_ceiling); Phase 3+ work adds the behavioral thresholds: presence/proximity threshold (cm), theme dim/wake thresholds (% ambient), replaces `.env.production` constants.
 - WiFi UX: known-networks select + disable password field for known networks (don't require a password on already-saved profiles).
 
 ## Pi-side observability + correctness
 
 - Pi clock drift fix: have the C6 broadcast time-of-day over MQTT; UI reads from there instead of local `Date()`.
-- Ambient light sensor sensitivity bump — lower the C6 ADC publish threshold (companion to HA-driven thresholds in the UX group).
+- Ambient light sensor default calibration — once `ambient_mv_ceiling` lands as an HA tunable per [A.2.g](phase2_groupA_multipanel.md#a2g--tunable-values-surface-as-ha-entities-not-paneltoml), validate the 500 mV default in real rooms and consider lowering the C6's per-tick filter threshold so smaller delta values from low-light environments still propagate.
 
 ## Release pipeline maturity
 
@@ -52,6 +54,8 @@ Named groups, no strict ordering. Pick whichever fits the moment when each becom
 - Kiosk-renderer choice via flag (`--cog` vs `--cage`).
 - WPE bubblewrap sandbox proper fix (currently bypassed via `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`).
 - Direnv + shell helper cleanup; cut-release sourced-function staleness.
+- `cut-release --rollback` flag: `gh release list --limit 5` → gum chooser → `gh release delete <tag> --yes` (release page + assets removed; tag and commits stay so a re-cut at the same tag is possible). Useful when iterating no-op betas (e.g. for the spawn-at-request-time gotcha) without polluting the releases page. ~30–60 lines of bash.
+- Split `docs/build_plan_v1.md` into a per-section folder structure matching `docs/build_plan_v2/` (README + breadcrumbs + per-topic files like overview / hardware / mqtt_topics / uart_protocol / c6_firmware_state / build_order / promoted_to_v2 / notes). Pure mechanical reorganization — no content changes. Benefits: easier to reference individual sections, smaller context window when an agent only needs one topic.
 
 ## Multi-device support (triggered by panel #2 actually existing)
 

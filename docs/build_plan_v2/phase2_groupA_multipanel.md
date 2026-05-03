@@ -1,3 +1,5 @@
+[Build Plan V2](README.md) › [Phase 2 — Polish & cleanup](phase2_polish.md) › Group A — Multi-panel readiness
+
 # Phase 2 Group A — Multi-panel readiness (design)
 
 > **Companion to [phase2_polish.md](phase2_polish.md) Group A.** The original v2-doc bullet was just "collapse the panel_app.c shim into platform driven by config." Discussion in May 2026 expanded scope to a hardware abstraction layer that also covers Pi model, display type, sensor presence/type, MCU target, and per-panel HA entity gating. This doc is the design.
@@ -124,14 +126,14 @@ model_name = "tfmini_plus"            # for HA reporting (device info field)
 uart = 0
 rx_pin = 21
 tx_pin = 22                           # wired but unused; lidar UART is RX-only for us
-publish_hz = 1
+default_publish_hz = 1                # per-panel default; HA tunable overrides at runtime (A.2.g)
 
 [firmware.sensors.ambient]
 present = true
 adc_unit = 1
 adc_channel = 0                       # ADC1 CH0 = D0 on XIAO C6
-publish_period_s = 5
-mv_ceiling = 500                      # mV that maps to 100%
+default_publish_period_s = 5          # per-panel default; HA tunable overrides at runtime (A.2.g)
+default_mv_ceiling = 500              # per-panel default (TEMT6000 calibration); HA tunable overrides at runtime (A.2.g)
 
 [bridge.controls]
 brightness = false                    # not implemented yet; A.2 leaves this gated off
@@ -281,6 +283,39 @@ panel.toml's `firmware.mcu.target` drives `idf.py set-target $TARGET` per panel.
 
 Per the user's clarification, `panels/feeding_control/ha/manifest.yaml` is a stale reference template that's not actually loaded by the integration — the YAML manifest is pasted directly into HA's config flow. Delete the file as part of this group. `panels/<id>/ha/` directory may stay empty as a "hatch for future product-specific HA-side Python" or get removed entirely (lean: remove).
 
+### A.2.g — Tunable values surface as HA entities, not panel.toml
+
+**Principle**: `panel.toml` declares hardware capabilities + presence (build-time fact). It does NOT carry tuning values — anything that might want adjustment on a deployed panel after the fact lives as an HA `number` (or `select`) entity gated by the corresponding capability. Changing a tunable from HA = 10 seconds on a phone. Changing a value in panel.toml = a release cut + OTA.
+
+**The split:**
+
+- **panel.toml (build-time hardware fact):** sensor presence/driver/pins, MCU target, display type/driver/rotation, control capability flags. Things that wouldn't change without disassembling the panel.
+- **HA entities (runtime tuning):** publish cadences, calibration ceilings, behavioral thresholds (presence/theme thresholds, dim thresholds, etc.).
+
+**Initial tunable set** — created as HA `number` entities under each panel's device, gated by the corresponding capability (per A.2.f's capability-driven entity creation):
+
+| Tunable | Capability gate | Default | Range | What it does |
+|---|---|---|---|---|
+| `lidar_publish_hz` | `sensors.lidar` | 1 Hz | 0.1–10 | Cadence at which C6 publishes proximity |
+| `ambient_publish_period_s` | `sensors.ambient` | 5 s | 1–60 | Cadence at which C6 publishes ambient brightness |
+| `ambient_mv_ceiling` | `sensors.ambient` | 500 mV | 100–3000 | Calibration: mV that maps to 100% brightness (TEMT6000-specific; tune to your room) |
+
+Behavioral-threshold tunables (presence threshold, theme dim/wake thresholds) are Phase 3+ HA UX work and follow the same pattern — see [phase3_themed.md → HA integration UX features](phase3_themed.md#ha-integration-ux-features).
+
+**Mechanism**:
+- New MQTT topic family: `thread_panel/<id>/cmd/tune/<param>`, payload `{"value": <number>}`, **retained** so HA's value survives broker restart and replays to the bridge on reconnect.
+- Integration publishes on entity-value change.
+- Bridge subscribes via existing UART-bridged `cmd/*` machinery; on receipt updates its in-memory state and (for cadence/calibration values the C6 controls) forwards to C6 via new UART envelope `{"type":"panel_set_tunable","name":"...","value":...}`.
+- C6 picks up new value next tick; no restart needed.
+
+**Three-tier value resolution at boot** (lowest to highest priority):
+
+1. **Firmware compile-time fallback**: every tunable has a `#define DEFAULT_<NAME>` baked into the firmware (e.g. `#define DEFAULT_LIDAR_PUBLISH_HZ 1`). Last-resort value if panel.toml is somehow malformed or missing the field. Baked at build time from the table-default column above.
+2. **panel.toml `default_*` (per-panel)**: optional fields in `[firmware.sensors.*]` (`default_publish_hz`, `default_publish_period_s`, `default_mv_ceiling`) capture the per-panel starting point in version control. Codegen'd into the same `#define` slots, overriding the firmware fallback for that specific panel build. Useful when a panel is deployed in non-default conditions (a bright sunroom needs `default_mv_ceiling = 1200` to prevent constant 100% saturation; a low-light closet needs 200) and you want sensible behavior even before HA tuning is configured. Still build-time — changing requires a rebuild + OTA — but the value lives with the panel definition rather than scattered as `#define` overrides.
+3. **HA retained `cmd/tune/*` (runtime override)**: published by HA when the user changes the corresponding `number` entity. Broker replays on bridge reconnect, so the override survives panel reboots, broker restarts, and HA restarts. This is the one you actually use to retune day-to-day; the panel.toml defaults exist as a "good starting point if HA has never tuned" and the firmware fallback exists as "the panel still works if the toml is broken."
+
+When HA is offline / has never tuned, the panel.toml default (or firmware fallback) stays in effect. When HA reconnects with a previously-published tune, the override applies within seconds. No fallback churn.
+
 ### A.2 commits estimate
 
 5–7 commits, 3–5 betas (each commit potentially shippable; pace dictated by hardware-verification cycles):
@@ -291,7 +326,8 @@ Per the user's clarification, `panels/feeding_control/ha/manifest.yaml` is a sta
 4. **Move panel-itself dispatch into platform** (the big one; panel_app.c shrinks). Likely the highest-risk single commit; needs careful before/after testing on production.
 5. **Bridge capability publishing**.
 6. **Integration capability consumption + entity gating** (entities are unconditionally created today; this commit makes them conditional. Validate that with capabilities all-true, the entity set is identical to today.)
-7. **MCU target switching in cut-release** + delete `panels/feeding_control/ha/manifest.yaml`. Validate H2 build works (even if no H2 hardware to test against yet).
+7. **Tunables: `cmd/tune/*` topic family + `panel_set_tunable` UART envelope + initial three HA `number` entities (lidar_publish_hz, ambient_publish_period_s, ambient_mv_ceiling).** Per A.2.g.
+8. **MCU target switching in cut-release** + delete `panels/feeding_control/ha/manifest.yaml`. Validate H2 build works (even if no H2 hardware to test against yet).
 
 Each commit shippable independently. Hardware verification at boundaries (especially after #4 and #6).
 

@@ -1,3 +1,5 @@
+[Build Plan V2](README.md) › Phase 2 — Polish & cleanup
+
 # Phase 2 — Polish & cleanup
 
 No new features in this phase. Goal: well-organized, dead-code-free, DRYed, simplified, accurately commented, ready for new panels to drop in.

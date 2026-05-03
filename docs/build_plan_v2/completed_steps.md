@@ -1,3 +1,5 @@
+[Build Plan V2](README.md) › Completed work
+
 # Completed work (historical reference)
 
 The following phases shipped during V2 active development. Their detailed plans are kept here for archaeology — current state of each is the source of truth.
