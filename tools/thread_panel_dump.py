@@ -24,13 +24,6 @@ Call (Developer Tools -> Actions):
     device_name: "Pet Feeder"
 
   Tick "Return response data" — the dump comes back inline.
-
-Future (v2):
-  Move this into the thread_panel custom integration as a real service
-  (e.g. `thread_panel.dump_device`) so it ships with the project and doesn't
-  require pyscript. Likely shape: register the service in __init__.py with a
-  voluptuous schema accepting device_id, return the dump as a service response
-  (supports_response=ServiceResponse.OPTIONAL).
 """
 
 

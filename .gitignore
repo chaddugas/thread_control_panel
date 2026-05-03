@@ -18,6 +18,13 @@ dist/
 # on each panel-bridge restart. V2 ships dist/ as a release-tarball artifact
 # instead, so dist/ is gitignored under the general `dist/` rule above.
 
+# Off-main HACS-layout staging produced by tools/cut-release: a transient
+# mirror of platform/integration/thread_panel/ that exists only on the
+# release tag's tree (not on main). cut-release pre-cleans it on each run,
+# but the directory lingers between releases — ignore so the working tree
+# reads clean and `git status` doesn't surface it.
+custom_components/
+
 # Python
 __pycache__/
 *.py[cod]

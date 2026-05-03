@@ -59,12 +59,6 @@
 // back as echoes.
 #define PANEL_TOPIC_CMD_REBOOT_PI          "thread_panel/" PANEL_ID "/cmd/reboot_pi"
 
-// OTA command. Payload is a JSON object with a `url` field pointing at a
-// firmware.bin served over HTTP (or HTTPS). The C6 downloads via
-// esp_https_ota into the idle OTA partition, flips the boot partition,
-// and reboots; ESP-IDF's rollback reverts if the new image misbehaves.
-#define PANEL_TOPIC_CMD_OTA                "thread_panel/" PANEL_ID "/cmd/ota"
-
 // Wi-Fi management commands. Forwarded to the Pi over UART as panel_cmd
 // envelopes for the bridge's wifi_manage module to dispatch. Subscribed
 // explicitly (rather than via cmd/#) for the same reason as reboot_pi —
