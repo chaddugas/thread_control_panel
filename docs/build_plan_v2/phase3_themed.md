@@ -54,7 +54,7 @@ Named groups, no strict ordering. Pick whichever fits the moment when each becom
 - Kiosk-renderer choice via flag (`--cog` vs `--cage`).
 - WPE bubblewrap sandbox proper fix (currently bypassed via `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`).
 - Direnv + shell helper cleanup; cut-release sourced-function staleness.
-- `cut-release --rollback` flag: `gh release list --limit 5` → gum chooser → `gh release delete <tag> --yes` (release page + assets removed; tag and commits stay so a re-cut at the same tag is possible). Useful when iterating no-op betas (e.g. for the spawn-at-request-time gotcha) without polluting the releases page. ~30–60 lines of bash.
+- ~~`cut-release --rollback` flag: `gh release list --limit 5` → gum chooser → `gh release delete <tag> --yes` (release page + assets removed; tag and commits stay so a re-cut at the same tag is possible). Useful when iterating no-op betas (e.g. for the spawn-at-request-time gotcha) without polluting the releases page. ~30–60 lines of bash.~~ ✅ DONE (2026-05-03). Shipped as `_cr_rollback` helper + `--rollback` subcommand dispatch in `tools/cut-release`. Multi-select via `gum choose --no-limit`, gum-confirm before destructive action, releases listed newest-first with `(prerelease|stable, YYYY-MM-DD)` annotations.
 - Split `docs/build_plan_v1.md` into a per-section folder structure matching `docs/build_plan_v2/` (README + breadcrumbs + per-topic files like overview / hardware / mqtt_topics / uart_protocol / c6_firmware_state / build_order / promoted_to_v2 / notes). Pure mechanical reorganization — no content changes. Benefits: easier to reference individual sections, smaller context window when an agent only needs one topic.
 
 ## Multi-device support (triggered by panel #2 actually existing)

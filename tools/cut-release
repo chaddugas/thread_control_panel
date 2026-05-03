@@ -3,6 +3,7 @@
 #
 # Usage:
 #   Run directly:  ./tools/cut-release
+#   Rollback:      ./tools/cut-release --rollback
 #   Or wire a zsh function in your ~/.zshrc that runs it from the repo root:
 #     cut-release() { (cd "$(git rev-parse --show-toplevel)" && ./tools/cut-release "$@") }
 #
@@ -12,29 +13,47 @@
 # code on disk.
 #
 # Prerequisites (checked at start, bails with install instructions if missing):
-#   - Active ESP-IDF v6.0 shell ($IDF_PATH set; run `idf` first)
+#   - Active ESP-IDF v6.0 shell ($IDF_PATH set; run `idf` first) — cut only,
+#     not needed for --rollback
 #   - gum (`brew install gum`) — interactive prompts
 #   - gh (`brew install gh && gh auth login`) — release creation + upload
-#   - yarn — UI build
+#   - yarn — UI build (cut only)
 #   - python3 — manifest writing + sha256
 #
-# Flow:
+# Cut flow:
 #   1. Check prereqs, branch, working tree, unpushed commits.
 #   2. Show commits since the last tag, prompt for version bump (gum,
 #      npm-style flat menu with prerelease support).
-#   3. Bump the integration manifest.json, commit, tag, push.
-#   4. Build per-panel UI bundles, per-panel firmware bins, bridge tarball,
+#   3. Compare current integration content (with __REPO__ substituted)
+#      against the previous release's thread_panel.zip — ignoring the
+#      manifest.json `version` field. If unchanged, the integration's
+#      manifest.json `version` stays at whatever the previous release
+#      had (HACS reads this field; no bump = no HACS prompt). If
+#      changed, bump as normal. Surfaces in the confirm message so
+#      the user sees the decision before proceeding.
+#   4. Bump panel_version.h (firmware version always bumps) and
+#      conditionally bump the integration manifest.json per (3),
+#      commit, tag, push.
+#   5. Build per-panel UI bundles, per-panel firmware bins, bridge tarball,
 #      integration zip into /tmp/panel-release-<version>/.
-#   5. Compute sha256 + size, write manifest.json.
-#   6. Auto-generate release notes from `git log` since prior tag; offer to
+#   6. Compute sha256 + size, write manifest.json.
+#   7. Auto-generate release notes from `git log` since prior tag; offer to
 #      edit before publishing.
-#   7. `gh release create` with all artifacts; `--prerelease` if version
+#   8. `gh release create` with all artifacts; `--prerelease` if version
 #      contains a `-` (semver prerelease tag).
 #
-# Exit early on any failure. Does NOT roll back tag/push if the artifact
-# build or release-create step fails — fix the issue and re-run with the
-# same version (delete tag manually if needed: `git tag -d` + `git push
-# --delete origin <tag>`).
+# Rollback flow (--rollback):
+#   1. List the 5 most recent GitHub releases.
+#   2. gum multi-select — pick which to unpublish.
+#   3. gum confirm.
+#   4. `gh release delete <tag> --yes` per selection. Tags + commits stay
+#      (no --cleanup-tag), so a re-cut at the same tag is possible without
+#      rewriting history.
+#
+# Exit early on any failure (cut path). Does NOT roll back tag/push if the
+# artifact build or release-create step fails — fix the issue and re-run
+# with the same version (delete tag manually if needed: `git tag -d` +
+# `git push --delete origin <tag>`).
 
 # ===== helpers =====
 
@@ -207,11 +226,247 @@ print(json.dumps({"size": size, "sha256": h.hexdigest()}))
 PY
 }
 
+# Check whether the integration content (everything in
+# platform/integration/thread_panel/, with __REPO__ substituted to match
+# what's shipped) is byte-identical to the previous release's
+# thread_panel.zip — ignoring the manifest.json `version` field which
+# bumps every release. On match, prints the previous release's
+# integration version on stdout and returns 0; caller uses that to
+# decide NOT to bump the integration's manifest.json this release.
+# On mismatch (or any failure to fetch / extract the previous zip),
+# returns non-zero silently with a stderr warning when applicable so
+# the caller falls through to the normal bump path.
+#
+# Decoupling the integration version from the release tag means HACS
+# only prompts for an integration update when the integration actually
+# changed, instead of on every panel/firmware/UI release. See A.1.a in
+# docs/build_plan_v2/phase2_groupA_multipanel.md.
+_cr_check_integration_unchanged() {
+  local prev_tag=$1 repo_root=$2
+  local tmpdir
+  tmpdir=$(mktemp -d -t cut-release-integ-XXXXXX) || return 1
+
+  local dl_dir="$tmpdir/dl"
+  local prev_dir="$tmpdir/prev"
+  local cur_dir="$tmpdir/cur"
+  mkdir -p "$dl_dir" "$prev_dir" "$cur_dir"
+
+  # Fetch previous release's integration zip. Failure here (no asset on
+  # that release, network blip, auth) → fall through to "treat as
+  # changed" so we don't accidentally suppress a real bump.
+  if ! ( cd "$repo_root" && gh release download "$prev_tag" --pattern thread_panel.zip --dir "$dl_dir" >/dev/null 2>&1 ); then
+    print -u2 "  warning: couldn't download $prev_tag/thread_panel.zip; treating integration as changed"
+    rm -rf "$tmpdir"
+    return 1
+  fi
+  if [[ ! -f "$dl_dir/thread_panel.zip" ]]; then
+    rm -rf "$tmpdir"
+    return 1
+  fi
+  if ! python3 -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$dl_dir/thread_panel.zip" "$prev_dir" 2>/dev/null; then
+    print -u2 "  warning: couldn't extract $prev_tag/thread_panel.zip; treating integration as changed"
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  # Stage current integration with __REPO__ substituted, mirroring the
+  # artifact-build phase below. Use cp -R "/." to copy CONTENTS, not the
+  # directory itself, so files land at $cur_dir root (same shape as the
+  # extracted zip).
+  if ! cp -R "$repo_root/platform/integration/thread_panel/." "$cur_dir/"; then
+    rm -rf "$tmpdir"
+    return 1
+  fi
+  local gh_repo
+  gh_repo=$(_cr_gh_repo "$repo_root")
+  if [[ -z "$gh_repo" ]]; then
+    rm -rf "$tmpdir"
+    return 1
+  fi
+  local f
+  for f in "$cur_dir"/*.py; do
+    [[ -f "$f" ]] || continue
+    if grep -q "__REPO__" "$f" 2>/dev/null; then
+      _cr_substitute_repo "$f" "$gh_repo" || { rm -rf "$tmpdir"; return 1 }
+    fi
+  done
+
+  # Stable hash of both directories, ignoring manifest.json `version`
+  # field (which bumps unconditionally on each release) and Python
+  # bytecode caches (which can leak in if HA / pyscript ran against the
+  # source tree).
+  local prev_version
+  prev_version=$(python3 - "$prev_dir" "$cur_dir" <<'PY'
+import hashlib, json, pathlib, sys
+
+def stable_hash(root):
+    h = hashlib.sha256()
+    p = pathlib.Path(root)
+    for f in sorted(p.rglob('*')):
+        if not f.is_file():
+            continue
+        if '__pycache__' in f.parts:
+            continue
+        rel = f.relative_to(p).as_posix()
+        h.update(rel.encode())
+        h.update(b'\x00')
+        if f.name == 'manifest.json':
+            data = json.loads(f.read_text())
+            data.pop('version', None)
+            h.update(json.dumps(data, sort_keys=True, indent=2).encode())
+        else:
+            h.update(f.read_bytes())
+        h.update(b'\x00\x00')
+    return h.hexdigest()
+
+prev_root, cur_root = sys.argv[1], sys.argv[2]
+if stable_hash(prev_root) == stable_hash(cur_root):
+    prev_manifest = json.load(open(f"{prev_root}/manifest.json"))
+    print(prev_manifest.get("version", ""))
+PY
+  ) || { rm -rf "$tmpdir"; return 1 }
+
+  rm -rf "$tmpdir"
+  if [[ -n "$prev_version" ]]; then
+    print -- "$prev_version"
+    return 0
+  fi
+  return 1
+}
+
+# Unpublish recent GitHub releases via interactive picker. Removes the
+# release page + assets only; tags and commits stay (no --cleanup-tag),
+# so a re-cut at the same tag is possible. Useful when iterating no-op
+# betas (per the spawn-at-request-time gotcha) without polluting the
+# releases page.
+_cr_rollback() {
+  emulate -L zsh
+  setopt local_options err_return no_unset pipefail
+
+  local repo_root
+  repo_root=$(git rev-parse --show-toplevel) || {
+    print -u2 "cut-release: not inside a git repository"
+    return 1
+  }
+
+  # Subset of prereqs — rollback only needs gh + gum + python3.
+  local missing=()
+  (( $+commands[gh] ))      || missing+=("gh (\`brew install gh && gh auth login\`)")
+  (( $+commands[gum] ))     || missing+=("gum (\`brew install gum\`)")
+  (( $+commands[python3] )) || missing+=("python3")
+  if (( ${#missing} )); then
+    print -u2 "cut-release --rollback: missing prerequisites:"
+    local m; for m in $missing; do print -u2 "  - $m"; done
+    return 1
+  fi
+
+  print "Fetching the 5 most recent GitHub releases..."
+  local releases_json
+  releases_json=$(cd "$repo_root" && gh release list --limit 5 --json tagName,isPrerelease,publishedAt 2>&1) || {
+    print -u2 "cut-release --rollback: failed to list releases:"
+    print -u2 "$releases_json"
+    return 1
+  }
+
+  if [[ "$releases_json" == "[]" || -z "$releases_json" ]]; then
+    print "No releases found on origin. Nothing to roll back."
+    return 0
+  fi
+
+  # Format: "<tag>  (prerelease|stable, <YYYY-MM-DD>)" per line, newest first
+  # (gh release list returns newest-first by published date already).
+  local choices
+  choices=$(print -- "$releases_json" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+for r in data:
+    tag = r["tagName"]
+    label = "prerelease" if r["isPrerelease"] else "stable"
+    date = (r.get("publishedAt") or "")[:10] or "unknown date"
+    print(f"{tag}  ({label}, {date})")
+')
+
+  if [[ -z "$choices" ]]; then
+    print -u2 "cut-release --rollback: failed to parse release list"
+    return 1
+  fi
+
+  print ""
+  local selected
+  selected=$(print -- "$choices" | gum choose --no-limit \
+    --header "Select releases to unpublish (space toggles, enter confirms):") || {
+    print "Aborted."
+    return 1
+  }
+
+  if [[ -z "$selected" ]]; then
+    print "No releases selected. Aborted."
+    return 0
+  fi
+
+  # Extract tag (everything before the two-space delimiter) from each
+  # selected line. Multi-select returns newline-separated lines.
+  local -a tags_to_delete
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    tags_to_delete+=("${line%%  (*}")
+  done <<< "$selected"
+
+  print ""
+  print "Will unpublish ${#tags_to_delete[@]} release(s) — tags + commits stay,"
+  print "only the GitHub release page + assets are removed:"
+  local tag
+  for tag in $tags_to_delete; do
+    print "  - $tag"
+  done
+  print ""
+
+  gum confirm "Proceed?" --affirmative="Unpublish" --negative="Abort" || {
+    print "Aborted."
+    return 0
+  }
+
+  local failed=0 deleted=0
+  for tag in $tags_to_delete; do
+    print -n "  $tag... "
+    if (cd "$repo_root" && gh release delete "$tag" --yes >/dev/null 2>&1); then
+      print "✓"
+      (( deleted++ ))
+    else
+      print "✗ (gh release delete failed)"
+      failed=1
+    fi
+  done
+
+  print ""
+  if (( failed )); then
+    print -u2 "cut-release --rollback: $deleted of ${#tags_to_delete[@]} succeeded; one or more deletions failed."
+    print -u2 "  Re-run --rollback or use 'gh release delete <tag> --yes' manually."
+    return 1
+  fi
+
+  print "✓ Unpublished $deleted release(s). Tags remain on origin; re-cut at the same tag with cut-release if desired."
+  return 0
+}
+
 # ===== main =====
 
 cut-release() {
   emulate -L zsh
   setopt local_options err_return no_unset pipefail
+
+  # Subcommand dispatch — keep this above the cut-path prereq check so
+  # rollback doesn't require the ESP-IDF / yarn environment.
+  if [[ "${1:-}" == "--rollback" ]]; then
+    _cr_rollback "${@:2}"
+    return $?
+  fi
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    print "Usage: cut-release            cut a new release (interactive)"
+    print "       cut-release --rollback unpublish recent GitHub release(s)"
+    return 0
+  fi
 
   if ! git rev-parse --git-dir >/dev/null 2>&1; then
     print -u2 "cut-release: not inside a git repository"
@@ -308,9 +563,23 @@ cut-release() {
   local is_prerelease=0
   [[ "$new_version" == *-* ]] && is_prerelease=1
 
+  # Check whether the integration content is unchanged from the previous
+  # release; if so, the integration version stays put (no HACS prompt).
+  # Done here so the result feeds into the user-facing confirm message
+  # below — they see exactly what's about to happen before saying yes.
+  local integration_unchanged_version=""
+  if [[ -n "$latest" ]]; then
+    print ""
+    print "Checking integration content vs $latest..."
+    integration_unchanged_version=$(_cr_check_integration_unchanged "$latest" "$repo_root" || true)
+  fi
+
   print ""
   print "Will tag, push, build artifacts, and publish: $new_version"
   (( is_prerelease )) && print "  (marked as prerelease — \`hacs.json\` Include-prereleases must be on for HACS to surface it)"
+  if [[ -n "$integration_unchanged_version" ]]; then
+    print "  (integration content unchanged since $latest — manifest.json version stays at $integration_unchanged_version, no HACS prompt)"
+  fi
   gum confirm "Proceed?" --affirmative="Cut release" --negative="Abort" || { print "Aborted."; return 1 }
 
   # ----- bump integration manifest.json -----
@@ -318,8 +587,15 @@ cut-release() {
   local version_header="$repo_root/platform/firmware/components/panel_platform/include/panel_version.h"
   local bare_version
   bare_version=$(_cr_no_v "$new_version")
+  # If integration content didn't change, target the previous integration
+  # version (write-through is a no-op since manifest.json is already at
+  # that value; git add then sees no change). HACS reads `version` from
+  # this file to decide whether to prompt; keeping it static across
+  # no-integration-change releases keeps HACS quiet.
+  local integration_target_version="$bare_version"
+  [[ -n "$integration_unchanged_version" ]] && integration_target_version="$integration_unchanged_version"
   if [[ -f "$manifest_path" ]]; then
-    python3 - "$manifest_path" "$bare_version" <<'PY'
+    python3 - "$manifest_path" "$integration_target_version" <<'PY'
 import json, sys, pathlib
 path, version = sys.argv[1], sys.argv[2]
 p = pathlib.Path(path)

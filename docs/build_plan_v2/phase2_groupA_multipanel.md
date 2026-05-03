@@ -43,27 +43,31 @@ The `panels/<id>/ha/manifest.yaml` reference template is **deleted entirely** �
 
 **Smallest blast radius, highest immediate value.** Solves the "every UI on every Pi" question and the "HA prompts to update the integration on every cut" annoyance. Doesn't touch firmware. Ships before A.2 starts.
 
-### A.1.a — Integration release train split
+### ~~A.1.a — Integration release train split~~ ✅ DONE
+
+**Status (2026-05-03)**: Shipped as `_cr_check_integration_unchanged` helper + integration-bump conditional in `tools/cut-release`. Dry-run against the production beta.34 release confirmed correct behavior (integration `select.py` modified post-beta.34 → would correctly bump on next cut). Acceptance tests via real cut deferred to next release.
 
 **Goal**: HACS prompts for an integration update only when the integration content actually changed, not on every cut-release.
 
-**Mechanism**:
+**Mechanism (as implemented)**:
 
-1. cut-release builds `thread_panel.zip` as today.
-2. After build, fetch the previous release's `manifest.json` from `gh release view <prev_tag>`. Compare integration sha256 (already computed in our manifest).
-3. **If unchanged**: revert the version bump cut-release made to [`platform/integration/thread_panel/manifest.json`](../../platform/integration/thread_panel/manifest.json) so the integration's `version` field stays at whatever it was last time the integration actually changed. Still ship the zip in the release (artifact set stays uniform), but with the unchanged version internally.
-4. **If changed**: keep the bump — same as today.
+1. After version bump prompt and gh-release pre-flight, before the user confirms "Cut release": cut-release calls `_cr_check_integration_unchanged $latest_tag $repo_root`.
+2. The helper downloads the previous release's `thread_panel.zip` via `gh release download`, extracts via Python's stdlib `zipfile`, stages a copy of current `platform/integration/thread_panel/` with `__REPO__` substituted (mirroring the artifact-build phase exactly), and computes a stable hash of both directories — ignoring `manifest.json`'s `version` field (it bumps every release) and `__pycache__/` (HA / pyscript bytecode that may leak into the source tree).
+3. **If hashes match**: the helper prints the previous release's integration version on stdout. cut-release captures it as `integration_unchanged_version`, surfaces "integration content unchanged since $latest — manifest.json version stays at $version, no HACS prompt" in the confirm message, and uses that previous version (instead of the new release version) when writing `platform/integration/thread_panel/manifest.json` in the bump phase. Net effect: file content stays byte-identical, `git add` is a no-op, no version-bump diff for integration.
+4. **If hashes differ** (or any failure to fetch / extract the previous zip): falls through to the normal bump path. Failures print a one-line stderr warning so the user knows the check didn't run cleanly, but don't block the release — bias is toward "treat as changed" (false positive = one extra HACS prompt; false negative = HACS misses a real update, worse).
 5. The off-main HACS-layout commit still happens unconditionally — the tag tree always contains `custom_components/thread_panel/`. Only the `version` field inside it is conditional.
 
-HACS reads the integration's `version` field from `manifest.json` to decide whether to prompt. Stable version = no prompt.
+**Implementation note (deviation from original spec)**: original spec compared `thread_panel.zip` sha256s directly. Implementation compares directory contents (with substitution applied + manifest.json `version` stripped) instead, because zip files include mtime metadata in their headers — byte-comparing two zips of identical content can spuriously differ depending on when they were built. Source-directory hashing is stable regardless of zip-time variation. Trade: slightly more code (extract + traverse) for byte-stability.
 
 **Trade-off**: integration version becomes "stuck at the last release tag where the integration content moved" — slightly odd cosmetically (integration says v2.0.0-beta.30 while latest release is v2.0.0-beta.40), but that's the desired semantic and accurate.
 
 PanelUpdateEntity (the firmware/UI/bridge prompt) keeps working off the release tag — that side is unchanged. Only the HACS prompt splits off.
 
-**Files touched**: `tools/cut-release` only. ~30 lines of new bash for the sha-compare + revert logic.
+**Files touched**: `tools/cut-release` only.
 
-**Validation**: cut a beta with no integration changes → confirm `manifest.json` still says the prior version → confirm HACS doesn't prompt. Then make a trivial integration change (whitespace) → cut → confirm version bumps and HACS prompts.
+**Validation plan** — at next release cut:
+- Cut a release immediately after a no-integration-change commit (e.g. a tools/cut-release tweak); confirm the confirm message says "integration content unchanged" and HACS doesn't prompt for an update after the release.
+- Then make any integration change (touch `platform/integration/thread_panel/__init__.py`, even a whitespace edit) and cut another release; confirm the confirm message does NOT say "unchanged" and HACS does prompt.
 
 ### A.1.b — Per-Pi panel identity + selective artifact download
 
@@ -89,7 +93,7 @@ The release manifest is already per-panel-keyed (`{"panels": {"feeding_control":
 
 3 commits, one beta:
 
-1. cut-release: sha-compare integration vs previous release, conditional version bump.
+1. ~~cut-release: sha-compare integration vs previous release, conditional version bump.~~ ✅ DONE 2026-05-03.
 2. install-pi.sh + install-lib.sh: panel_id prompt + selective artifact download.
 3. README/docs updates if needed.
 
