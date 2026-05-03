@@ -229,6 +229,7 @@ Named groups, no strict ordering. Pick whichever fits the moment when each becom
 - Switch cut-release notes editor from vim to nano (vim `:q` cancels the release while still incrementing the version counter).
 - Investigate GitHub release sort order weirdness on the releases page + HACS picker (current order: beta.28, beta.26, beta.9-4, beta.25, beta.24, ... — neither chronological nor alphabetical).
 - Persistent journald on existing panels — document the manual one-liner in the README, or wire into install-pi.sh hardening.
+- Suppress the `LIBARCHIVE.xattr.com.apple.provenance` tar warnings during install-pi.sh / panel-update.sh extract phases. They come from macOS's BSD tar adding extended-attribute headers that GNU tar on the Pi doesn't recognize; extracts succeed cleanly but the output gets noisy. Two fix options on the cut-release side: (a) set `COPYFILE_DISABLE=1` in the env before invoking `tar` (tells macOS to skip extended attributes — simplest, no new tooling); (b) `brew install gnu-tar` and call `gtar` instead of system `tar` (cross-platform-clean but adds a dependency). Lean: option (a).
 
 ### Robustness & correctness
 
