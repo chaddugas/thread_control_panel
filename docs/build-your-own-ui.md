@@ -1,6 +1,6 @@
 # Build your own UI
 
-A panel's product UI is a **bundle of assets the panel downloads and mounts** — any framework, or none. The platform owns the kiosk page (pairing, updates, health, failure screens); your app is a tenant it mounts into a node it hands you. Two contracts cover everything: the [store API](store-api.md) (the data) and the [ui-bundle contract](ui-bundle.md) (the handoff).
+A panel's product UI is a **bundle of assets the panel downloads and mounts** — any framework, or none. The platform owns the kiosk page (pairing, updates, health, failure screens); your app is a tenant it mounts into a node it hands you. The data side is the [store API](store-api.md); the handoff side — what you ship and how the panel mounts it — is covered end-to-end by this guide.
 
 The shape of it:
 
@@ -127,7 +127,7 @@ The declarations ship in `ui-starter.zip`, live in this repo as [`store.v1.d.ts`
 
 ### Shipping
 
-Tar the build output **at its root** (`tar -czf my-ui.tar.gz -C dist .`) and attach it to a GitHub release. In Home Assistant: the panel's device page → Configure → **Panel UI source** → `owner/repo` (plus a read-only token for a private repo — it's pushed to the panel and never stored in HA). Saving installs immediately; the **Update UI** button re-fetches the latest release any time; emptying the source removes the downloaded UI and the panel falls back to its health screen. A release with several `.tar.gz` assets just means picking yours from a dropdown.
+Tar the build output **at its root** (`tar -czf my-ui.tar.gz -C dist .`) and attach it to a GitHub release. In Home Assistant: the panel's device page → Configure → **Panel UI source** → `owner/repo` (plus a read-only token for a private repo — it's pushed to the panel and never stored in HA). Saving installs immediately; the **Update UI** button re-fetches the latest release any time; emptying the source removes the downloaded UI and the panel falls back to its health screen. A release with several `.tar.gz` assets just means picking yours from a dropdown. Want publishing a release to press that button for you? See [auto-update](auto-update.md).
 
 ### Debugging like the kiosk
 

@@ -1,98 +1,550 @@
-# Contract — store API
+# Store API — /_panel/store.v1.js
 
-> **Mirrored copy.** The authoritative version of this document lives with the platform source (private); this copy is republished for UI authors at each platform release. Internal cross-references may point into the source repo.
+Type declarations for the served panel store (`/_panel/store.v1.js`).
 
-The public surface of the served panel store: the state families, command helpers, and lifecycle a panel UI — any framework, any repo — programs against. The store module is the blessed client of [envelope-schema](envelope-schema.md)'s bridge↔UI pipe; that contract stays the wire-level ground truth, while this one is the surface UI authors actually touch. The root README carries the how-to (consumption recipes, dev workflow); this document is the authoritative *what*.
+TypeScript refuses ambient declarations for rooted specifiers, so this is
+a plain declaration module: drop it anywhere in the project and map the
+import specifier to it in tsconfig.json —
 
-## Participants
+  "compilerOptions": {
+    "paths": { "/_panel/store.v1.js": ["./store.v1.d.ts"] }
+  }
 
-- **Provider:** the panel. [`platform/panel-store`](../platform/panel-store.md) builds the module; the platform installs it; [`panel-ui-server.py`](../../../platform/deploy/panel-ui-server.py) serves it at the reserved, versioned path **`/_panel/store.v1.js`** (types beside it at `/_panel/store.v1.d.ts`), with CORS open for cross-origin dev imports ([deploy](../platform/deploy.md)).
-- **Consumers:** any UI rendered on (or developed against) the panel. The exported stores are real nanostores stores and the declared `PanelStore` interface satisfies nanostores' `ReadableAtom`, so the **official `@nanostores/*` framework adapters are first-class consumers** (runtime + types verified against `@nanostores/vue`); bare `subscribe()` works framework-free; the platform shell uses [`ui-core`](../platform/ui-core.md)'s own glue.
+No package install. Panels also serve the copy matching their running
+platform at `/_panel/store.v1.d.ts`, one curl away.
 
-## Definition
+## Store shape
 
-### URL surface
+### PanelStore
 
-| Path | Content |
-|---|---|
-| `/_panel/store.v1.js` | the store module — self-contained ESM, no imports |
-| `/_panel/store.v1.d.ts` | TypeScript declarations for the module specifier |
+The readable face of a nanostores store. `subscribe` fires immediately
+with the current value and on every change; `listen` skips the immediate
+call. Every change emits a fresh object identity. Both return an
+unsubscribe function.
 
-Production UIs import same-origin (`import { … } from "/_panel/store.v1.js"`); dev imports cross-origin from a WiFi-up panel or resolves the specifier through a bundler proxy/alias. The module's version always matches the running platform because both install from the same release.
+Everything below the first three members is nanostores' store lifecycle
+surface — present on the runtime objects (they are real nanostores
+stores) and declared so the official @nanostores/* framework adapters
+type-check against these exports. Apps use get/subscribe/listen and
+leave the rest alone.
 
-### Lifecycle & raw I/O
+#### Type Parameters
 
-| Export | Behavior |
-|---|---|
-| `connect(options?: {url?})` | opens the bridge WS (default `ws://${location.hostname}:8765`); auto-reconnects every 1 s; idempotent for the same URL, **last-URL-wins** for a different one |
-| `disconnect()` | closes and stops reconnecting |
-| `send(envelope)` | one raw envelope to the bridge; returns `false` (envelope dropped) while the WS is down — no queueing, matching the pipe's no-replay model |
-| `bridgeUrl()` | the URL the store is (re)connecting to |
-| `uiLog(message, scope?)` | a diagnostic line into the panel's journald via the bridge |
-| `STORE_API` | `"v1"` — the contract version of this surface |
+##### T
 
-### Command helpers
+`T`
 
-| Export | Sends | Notes |
-|---|---|---|
-| `callService(entityId, action, data?)` | `call_service` | rejected by HA unless the entity is rostered; dropped bridge-side while HA is offline — gate UI on `$connection.ha` instead of firing blind |
-| `setPanel(name, value)` | `panel_set` | panel-field write, dispatched to a bridge control |
-| `panelCommand(name, value?)` | `panel_cmd` | e.g. `reboot_pi`; structured args ride under `value` |
+#### Methods
 
-### Public state families
+##### get()
 
-Every family is a nanostores store: `get()` reads, `subscribe(fn)` reads + tracks (fires immediately), and every change emits a fresh object identity. Consumption details: the [nanostores docs](https://github.com/nanostores/nanostores).
+> **get**(): `T`
 
-| Store | Shape | Carries |
-|---|---|---|
-| `$connection` | `{bridge, ha, c6HeartbeatAt, lastError}` | WS-to-bridge state · HA availability (`"online"`/`"offline"`/`null`) · last C6 heartbeat stamp · last WS error |
-| `$entities` | `Record<entity_id, {state, attributes}>` | latest full snapshot per forwarded HA entity — never diffs |
-| `$roster` | `[{entity_id, friendly_name, area}]` | which entities this panel receives |
-| `$panelState` | `Record<name, value>` | panel-itself fields (`wifi_state`, `backlight`, `version`, …) |
-| `$capabilities` | `object \| null` | the panel's capabilities document ([hw-config](hw-config.md) owns the schema) |
-| `$sensors` | `Record<name, {value, receivedAt, …extras}>` | latest reading per declared sensor, arrival-stamped |
-| `$tunes` | `Record<name, number>` | HA-owned runtime tunables; absent names mean "not pushed yet — use your own default" |
-| `$panelInfo` | `{serial, c6Version, lanHost}` | identity: board serial (the panel's only identity), running C6 firmware, the panel's mDNS name |
-| `$now` | `number` | shared 1 s epoch-ms tick; runs only while subscribed |
-| `$c6LinkFresh` | `boolean` | heartbeat seen within 30 s |
+###### Returns
 
-**The generic entity model is the point:** entity ids, sensor names, panel-state names, and the capabilities document are open-ended — a panel with newly declared hardware ([hardware-flexibility](../../tracks/hardware-flexibility.md)) flows through this surface without revision. A UI hardcodes *its* ids, never enumerates the platform's.
+`T`
 
-### Platform-internal families
+##### listen()
 
-`$provisioning`, `$updateStatus`/`$otaActive`, and `$uiStatus` ship in the module but are **not** part of this contract: the platform shell owns the pairing and OTA screens, and product UIs never reimplement them. Their shapes may change without a `v2`.
+> **listen**(`listener`): () => `void`
 
-## Invariants & traps
+###### Parameters
 
-- **`v1` is the surface version, not SemVer.** Additions (new families, new optional fields) ride the platform's `panel` version under the same filename; a breaking change to anything above ships `store.v2.js` beside v1, never under it.
-- **No client-side queueing anywhere.** Every send while disconnected is dropped (returns `false`) by design — every recovery path on the pipe re-converges on current state, so a replayed stale command would be wrong, not helpful.
-- **Subscribe, don't poll.** `$now`-derived stores (`$c6LinkFresh`) only re-evaluate while subscribed; a `.get()` poll sees stale values.
-- **Null means "not seen yet", not "off".** `$connection.ha`, `$panelInfo.serial`/`lanHost`, and absent `$tunes` names are unknowns until the snapshot lands; render the unknown state, don't default to failure.
-- **The roster is the service-call allowlist.** `callService` against an unrostered entity is silently useless — HA rejects it.
-- **The store never throws on unknown envelopes** — forward-compatible by contract; a newer platform talking to an older UI degrades to "new data invisible", never to a crash.
-- **`PanelStore` mirrors nanostores' `ReadableAtom` member-for-member** (including the lifecycle surface: `value`, `init`, `lc`, `notify`, `off`) — narrowing it breaks type-checking for every official adapter consumer. Apps still touch only `get`/`subscribe`/`listen`.
+###### listener
 
-## Examples
+(`value`, `oldValue`) => `void`
 
-```js
-// Same-origin (production) or cross-origin (dev) — identical surface.
-import { connect, callService, $entities, $connection } from "/_panel/store.v1.js";
+###### Returns
 
-connect(); // kiosk default; dev: connect({ url: "ws://<panel>.local:8765" })
+() => `void`
 
-const unsubscribe = $entities.subscribe((all) => {
-  render(all["switch.pet_feeder"]?.state ?? "unknown");
-});
+##### notify()
 
-if ($connection.get().ha === "online") {
-  callService("switch.pet_feeder", "switch.toggle");
-}
-```
+> **notify**(`oldValue?`): `void`
 
-Characteristic mistake — polling a subscriber-gated store:
+###### Parameters
 
-```js
-setInterval(() => status($c6LinkFresh.get()), 1000); // stale: nothing mounted $now
-$c6LinkFresh.subscribe(status);                      // correct
-```
+###### oldValue?
 
+`T`
+
+###### Returns
+
+`void`
+
+##### off()
+
+> **off**(): `void`
+
+###### Returns
+
+`void`
+
+##### subscribe()
+
+> **subscribe**(`listener`): () => `void`
+
+###### Parameters
+
+###### listener
+
+(`value`, `oldValue?`) => `void`
+
+###### Returns
+
+() => `void`
+
+#### Properties
+
+##### init
+
+> `readonly` **init**: `T` \| `undefined`
+
+##### lc
+
+> `readonly` **lc**: `number`
+
+##### value
+
+> `readonly` **value**: `T` \| `undefined`
+
+## Lifecycle & raw I/O
+
+### ConnectOptions
+
+#### Properties
+
+##### url?
+
+> `optional` **url?**: `string`
+
+Bridge WS URL; defaults to `ws://${location.hostname}:8765`.
+
+***
+
+### STORE\_API
+
+> `const` **STORE\_API**: `"v1"`
+
+Contract version of this surface — matches the served filename.
+
+***
+
+### bridgeUrl()
+
+> **bridgeUrl**(): `string`
+
+The URL the store is (re)connecting to; empty before connect().
+
+#### Returns
+
+`string`
+
+***
+
+### connect()
+
+> **connect**(`options?`): `void`
+
+Open the bridge connection. Auto-reconnects every 1 s until
+disconnect(). Idempotent for the same URL; last-URL-wins for a
+different one.
+
+#### Parameters
+
+##### options?
+
+[`ConnectOptions`](#connectoptions)
+
+#### Returns
+
+`void`
+
+***
+
+### disconnect()
+
+> **disconnect**(): `void`
+
+#### Returns
+
+`void`
+
+***
+
+### send()
+
+> **send**(`envelope`): `boolean`
+
+Send one envelope to the bridge. Returns false (envelope dropped)
+while the WS is down — no queueing, by contract.
+
+#### Parameters
+
+##### envelope
+
+[`OutgoingCommand`](#outgoingcommand) \| `Record`\<`string`, `unknown`\>
+
+#### Returns
+
+`boolean`
+
+***
+
+### uiLog()
+
+> **uiLog**(`message`, `scope?`): `boolean`
+
+A diagnostic line into the panel's journald via the bridge.
+
+#### Parameters
+
+##### message
+
+`string`
+
+##### scope?
+
+`string`
+
+#### Returns
+
+`boolean`
+
+## Commands
+
+### callService()
+
+> **callService**(`entityId`, `action`, `data?`): `boolean`
+
+HA service call against a rostered entity. HA rejects unrostered
+entity_ids; the bridge drops calls while HA is offline — gate on
+`$connection.ha` instead of firing blind.
+
+#### Parameters
+
+##### entityId
+
+`string`
+
+##### action
+
+`string`
+
+##### data?
+
+`Record`\<`string`, `unknown`\>
+
+#### Returns
+
+`boolean`
+
+***
+
+### panelCommand()
+
+> **panelCommand**(`name`, `value?`): `boolean`
+
+Panel command (e.g. `reboot_pi`). Structured args ride under `value`.
+
+#### Parameters
+
+##### name
+
+`string`
+
+##### value?
+
+`unknown`
+
+#### Returns
+
+`boolean`
+
+***
+
+### setPanel()
+
+> **setPanel**(`name`, `value`): `boolean`
+
+Panel-field write (e.g. `wifi_enabled`), dispatched to a bridge control.
+
+#### Parameters
+
+##### name
+
+`string`
+
+##### value
+
+`unknown`
+
+#### Returns
+
+`boolean`
+
+## State families
+
+### ConnectionState
+
+#### Properties
+
+##### bridge
+
+> **bridge**: `boolean`
+
+The store's WebSocket to the bridge is open.
+
+##### c6HeartbeatAt
+
+> **c6HeartbeatAt**: `number` \| `null`
+
+Arrival stamp of the most recent C6 heartbeat; null until first seen.
+
+##### ha
+
+> **ha**: `"online"` \| `"offline"` \| `null`
+
+HA availability as seen through the panel; null until first seen.
+
+##### lastError
+
+> **lastError**: `string` \| `null`
+
+Last WebSocket-level error, cleared on successful (re)connect.
+
+***
+
+### EntityState
+
+#### Properties
+
+##### attributes
+
+> **attributes**: `Record`\<`string`, `unknown`\>
+
+##### state
+
+> **state**: `string`
+
+***
+
+### PanelInfoState
+
+#### Properties
+
+##### c6Version
+
+> **c6Version**: `string` \| `null`
+
+Running C6 firmware version, verbatim (carries the `v` prefix).
+
+##### lanHost
+
+> **lanHost**: `string` \| `null`
+
+The panel's mDNS name (`<hostname>.local`); null until seen.
+
+##### serial
+
+> **serial**: `string` \| `null`
+
+Board serial — the panel's only identity; null until seen.
+
+***
+
+### RosterEntry
+
+#### Properties
+
+##### area
+
+> **area**: `string` \| `null`
+
+##### entity\_id
+
+> **entity\_id**: `string`
+
+##### friendly\_name
+
+> **friendly\_name**: `string` \| `null`
+
+***
+
+### SensorReading
+
+#### Indexable
+
+> \[`extra`: `string`\]: `unknown`
+
+Sensor-specific extras (e.g. proximity `strength`, ambient `raw`/`mv`).
+
+#### Properties
+
+##### receivedAt
+
+> **receivedAt**: `number`
+
+Arrival stamp (epoch ms).
+
+##### value
+
+> **value**: `number`
+
+***
+
+### $c6LinkFresh
+
+> `const` **$c6LinkFresh**: [`PanelStore`](#panelstore)\<`boolean`\>
+
+A C6 heartbeat arrived within the last 30 s. Subscribe, don't poll.
+
+***
+
+### $capabilities
+
+> `const` **$capabilities**: [`PanelStore`](#panelstore)\<`Record`\<`string`, `unknown`\> \| `null`\>
+
+The panel's capabilities document; schema owned by the hw-config contract.
+
+***
+
+### $connection
+
+> `const` **$connection**: [`PanelStore`](#panelstore)\<[`ConnectionState`](#connectionstate)\>
+
+***
+
+### $entities
+
+> `const` **$entities**: [`PanelStore`](#panelstore)\<`Record`\<`string`, [`EntityState`](#entitystate)\>\>
+
+Latest full snapshot per forwarded HA entity — never diffs.
+
+***
+
+### $now
+
+> `const` **$now**: [`PanelStore`](#panelstore)\<`number`\>
+
+Shared 1 s epoch-ms tick; runs only while subscribed — never poll it.
+
+***
+
+### $panelInfo
+
+> `const` **$panelInfo**: [`PanelStore`](#panelstore)\<[`PanelInfoState`](#panelinfostate)\>
+
+***
+
+### $panelState
+
+> `const` **$panelState**: [`PanelStore`](#panelstore)\<`Record`\<`string`, `unknown`\>\>
+
+Panel-itself fields (`wifi_state`, `backlight`, `version`, …).
+
+***
+
+### $roster
+
+> `const` **$roster**: [`PanelStore`](#panelstore)\<[`RosterEntry`](#rosterentry)[]\>
+
+Which entities this panel receives (the service-call allowlist).
+
+***
+
+### $sensors
+
+> `const` **$sensors**: [`PanelStore`](#panelstore)\<`Record`\<`string`, [`SensorReading`](#sensorreading)\>\>
+
+Latest reading per declared sensor — names are open-ended by design.
+
+***
+
+### $tunes
+
+> `const` **$tunes**: [`PanelStore`](#panelstore)\<`Record`\<`string`, `number`\>\>
+
+HA-owned runtime tunables; absent names mean "not pushed yet".
+
+## Wire shapes
+
+### CallServiceCommand
+
+#### Properties
+
+##### action
+
+> **action**: `string`
+
+##### data
+
+> **data**: `Record`\<`string`, `unknown`\>
+
+##### entity\_id
+
+> **entity\_id**: `string`
+
+##### type
+
+> **type**: `"call_service"`
+
+***
+
+### PanelCmdCommand
+
+#### Properties
+
+##### name
+
+> **name**: `string`
+
+##### type
+
+> **type**: `"panel_cmd"`
+
+##### value?
+
+> `optional` **value?**: `unknown`
+
+***
+
+### PanelSetCommand
+
+#### Properties
+
+##### name
+
+> **name**: `string`
+
+##### type
+
+> **type**: `"panel_set"`
+
+##### value
+
+> **value**: `unknown`
+
+***
+
+### UiLogCommand
+
+#### Properties
+
+##### message
+
+> **message**: `string`
+
+##### scope
+
+> **scope**: `string`
+
+##### type
+
+> **type**: `"ui_log"`
+
+***
+
+### OutgoingCommand
+
+> **OutgoingCommand** = [`CallServiceCommand`](#callservicecommand) \| [`PanelSetCommand`](#panelsetcommand) \| [`PanelCmdCommand`](#panelcmdcommand) \| [`UiLogCommand`](#uilogcommand) \| `UiHeartbeatCommand`
