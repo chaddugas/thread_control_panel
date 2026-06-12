@@ -1,0 +1,61 @@
+# ESP-IDF build artifacts
+build/
+managed_components/
+sdkconfig.old
+dependencies.lock
+
+# sdkconfig is generated per build tree; never commit it.
+sdkconfig
+
+# Node / Vite (UI dist/ ships as a release-tarball asset, not via git)
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# direnv cache + local secrets overlay (.envrc.local.example is tracked
+# and documents the format; .envrc.local is per-clone and holds the
+# actual values).
+.direnv/
+.envrc.local
+.env
+
+# Playwright MCP artifacts (Claude-driven browser sessions during dev;
+# screenshots, snapshots, and console logs — never commit)
+.playwright-mcp/
+
+# Diagnostic bundles pulled from the Pi during debugging sessions —
+# ephemeral working artifacts, not source.
+logs/
+
+# OS / editor
+.DS_Store
+.idea/
+*.swp
+*.swo
+*~
+
+# Local-only IDE settings (the IDE-shared ones are committed under .vscode/)
+.vscode/*.local
+.vscode/launch.json
+# Local commit-message scratch file (Claude populates with draft messages
+# after finishing a chunk of work; user reviews/edits before committing).
+# Set `git config commit.template <repo-path>/.gitmessage.txt` to use.
+.gitmessage.txt
+
+# Claude local session settings (repo skills under .claude/skills/ ARE tracked)
+.claude/settings.local.json
+
+# cut-release artifact staging (cr_staging_root — per-tag dirs, removed on success)
+.release-staging/
+
+docs/*.yaml
