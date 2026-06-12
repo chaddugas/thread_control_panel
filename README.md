@@ -13,3 +13,4 @@ curl -sSL https://github.com/chaddugas/thread_control_panel/releases/latest/down
 - [Build your own UI](docs/build-your-own-ui.md) — the guided walkthrough
 - [The store API](docs/store-api.md) — the data surface a UI programs against
 - [The ui-bundle contract](docs/ui-bundle.md) — what a UI ships and how the panel mounts it
+- [`store.v1.d.ts`](store.v1.d.ts) — the store's TypeScript declarations, republished per release

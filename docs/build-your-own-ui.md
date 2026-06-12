@@ -1,8 +1,6 @@
 # Build your own UI
 
-> **Mirrored copy.** The authoritative version of this document lives with the platform source (private); this copy is republished for UI authors at each platform release. Internal cross-references may point into the source repo.
-
-A panel's product UI is a **bundle of assets the panel downloads and mounts** — any framework, or none. The platform owns the kiosk page (pairing, updates, health, failure screens); your app is a tenant it mounts into a node it hands you. Two contracts cover everything: the [store API](docs/specs/contracts/store-api.md) (the data) and the [ui-bundle contract](docs/specs/contracts/ui-bundle.md) (the handoff).
+A panel's product UI is a **bundle of assets the panel downloads and mounts** — any framework, or none. The platform owns the kiosk page (pairing, updates, health, failure screens); your app is a tenant it mounts into a node it hands you. Two contracts cover everything: the [store API](store-api.md) (the data) and the [ui-bundle contract](ui-bundle.md) (the handoff).
 
 The shape of it:
 
@@ -120,7 +118,7 @@ Adapters: [@nanostores/vue](https://github.com/nanostores/vue), [@nanostores/rea
 
 ### TypeScript
 
-Grab the declarations from your panel (`curl -O http://<panel-host>:8080/_panel/store.v1.d.ts`) or from [`platform/panel-store/store.v1.d.ts`](platform/panel-store/store.v1.d.ts), then map the specifier to the file:
+The declarations ship in `ui-starter.zip`, live in this repo as [`store.v1.d.ts`](../store.v1.d.ts) (republished per release), and are served by any WiFi-up panel (`curl -O http://<panel-host>:8080/_panel/store.v1.d.ts`). Map the specifier to the file:
 
 ```jsonc
 // tsconfig.json
