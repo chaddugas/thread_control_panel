@@ -345,6 +345,13 @@ Running C6 firmware version, verbatim (carries the `v` prefix).
 
 The panel's mDNS name (`<hostname>.local`); null until seen.
 
+##### name
+
+> **name**: `string` \| `null`
+
+Optional HA-side label (raw, no serial tail); null when unset → consumers
+fall back to "Thread Panel". Cosmetic only — never an identity.
+
 ##### serial
 
 > **serial**: `string` \| `null`

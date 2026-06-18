@@ -206,6 +206,9 @@ export const $tunes: PanelStore<Record<string, number>>;
 export interface PanelInfoState {
   /** Board serial — the panel's only identity; null until seen. */
   serial: string | null;
+  /** Optional HA-side label (raw, no serial tail); null when unset → consumers
+   * fall back to "Thread Panel". Cosmetic only — never an identity. */
+  name: string | null;
   /** Running C6 firmware version, verbatim (carries the `v` prefix). */
   c6Version: string | null;
   /** The panel's mDNS name (`<hostname>.local`); null until seen. */
