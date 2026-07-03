@@ -12,7 +12,7 @@ Flash Raspberry Pi OS Lite (set your WiFi and SSH credentials in the imager), le
 curl -sSL https://github.com/chaddugas/thread_control_panel/releases/latest/download/install-pi.sh | bash
 ```
 
-Then pair from Home Assistant: the panel shows up under **Settings → Devices & Services** as a discovered Thread Panel — pick the entities it should see, paste its hardware config, confirm the 6-digit code on the panel's screen, done. Certificates and keys are minted automatically; there is nothing to place on the Home Assistant host.
+Then pair from Home Assistant: the panel shows up under **Settings → Devices & Services** as a discovered Thread Panel — pick the entities it should see, paste its hardware config, confirm the 6-digit code on the panel's screen, done. Certificates and keys are minted automatically. The full walkthrough — hardware assembly, DSI screens, sensors — is [Set up a panel](docs/setup.md).
 
 ## Updates
 
@@ -22,6 +22,7 @@ Panels keep themselves current from this repository: each one exposes an update 
 
 A panel's interface is a bundle of ordinary web assets you publish as a GitHub release — any framework, or none. The fastest start is **`ui-starter.zip`** from the [latest release](https://github.com/chaddugas/thread_control_panel/releases/latest): a working scaffold to unzip, push, and point a panel at.
 
+- [Set up a panel](docs/setup.md) — hardware assembly to a paired panel, end to end
 - [Build your own UI](docs/build-your-own-ui.md) — the guided walkthrough, from blank repo to a panel running your app
 - [Auto-update your panel UI](docs/auto-update.md) — make publishing a release install it on the panel by itself
 - [Store API reference](docs/store-api.md) — every store and command helper, generated from the typings at each release

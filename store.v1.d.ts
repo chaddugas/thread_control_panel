@@ -71,9 +71,7 @@ export function disconnect(): void;
  *
  * @group Lifecycle & raw I/O
  */
-export function send(
-  envelope: OutgoingCommand | Record<string, unknown>,
-): boolean;
+export function send(envelope: OutgoingCommand | Record<string, unknown>): boolean;
 
 /**
  * The URL the store is (re)connecting to; empty before connect().
@@ -94,7 +92,7 @@ export function uiLog(message: string, scope?: string): boolean;
  *
  * @group Lifecycle & raw I/O
  */
-export const STORE_API: "v1";
+export const STORE_API: 'v1';
 
 // ---- commands ----
 
@@ -132,7 +130,7 @@ export interface ConnectionState {
   /** The store's WebSocket to the bridge is open. */
   bridge: boolean;
   /** HA availability as seen through the panel; null until first seen. */
-  ha: "online" | "offline" | null;
+  ha: 'online' | 'offline' | null;
   /** Arrival stamp of the most recent C6 heartbeat; null until first seen. */
   c6HeartbeatAt: number | null;
   /** Last WebSocket-level error, cleared on successful (re)connect. */
@@ -238,7 +236,7 @@ export const $c6LinkFresh: PanelStore<boolean>;
 
 /** @internal */
 export interface ProvisioningState {
-  phase: "unprovisioned" | "awaiting_seal" | "provisioned" | null;
+  phase: 'unprovisioned' | 'awaiting_seal' | 'provisioned' | null;
   sas: string | null;
 }
 /** @internal */
@@ -265,7 +263,7 @@ export interface UiQuarantineError {
 export interface UiStatusState {
   /** null until the bridge's first ui_status arrives (unknown ≠ absent). */
   installed: boolean | null;
-  source: "downloaded" | "release" | null;
+  source: 'downloaded' | 'release' | null;
   /** Changes on every install/OTA/remove — the shell's reload signal. */
   stamp: string | null;
   /** Watchdog quarantine — the shell never imports while true. */
@@ -284,26 +282,26 @@ export const $uiStatus: PanelStore<UiStatusState>;
 
 /** @group Wire shapes */
 export interface CallServiceCommand {
-  type: "call_service";
+  type: 'call_service';
   entity_id: string;
   action: string;
   data: Record<string, unknown>;
 }
 /** @group Wire shapes */
 export interface PanelSetCommand {
-  type: "panel_set";
+  type: 'panel_set';
   name: string;
   value: unknown;
 }
 /** @group Wire shapes */
 export interface PanelCmdCommand {
-  type: "panel_cmd";
+  type: 'panel_cmd';
   name: string;
   value?: unknown;
 }
 /** @group Wire shapes */
 export interface UiLogCommand {
-  type: "ui_log";
+  type: 'ui_log';
   message: string;
   scope: string;
 }
@@ -313,7 +311,7 @@ export interface UiLogCommand {
  * @internal
  */
 export interface UiHeartbeatCommand {
-  type: "ui_heartbeat";
+  type: 'ui_heartbeat';
 }
 /** @group Wire shapes */
 export type OutgoingCommand =
