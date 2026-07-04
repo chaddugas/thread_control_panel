@@ -20,6 +20,7 @@ Run `panel-logs --help` for the full list of scopes and more examples. A few wor
 - `--scope` takes one or more names (combined with OR). Common ones: `bridge`, `c6` (firmware), `ui`, `ota`, `wifi`, `net`, `ws`, `thread`.
 - `--level debug` is the deep view of a **software update** — it surfaces every step's command output. Day-to-day logging stops at `info`.
 - `--since` accepts ordinary expressions (`"3 hours ago"`, `"2026-06-18 12:00"`) plus shortcuts: `last-update`, `last-ota-fail`, `last-boot`.
+- Times shown as `~HH:MM:SS` are back-computed: the panel's clock hadn't synced yet when those lines were written (it learns the time from Home Assistant), so `panel-logs` derives their true wall time from the journal's internal clocks.
 
 ## Versions
 
