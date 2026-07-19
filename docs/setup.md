@@ -36,7 +36,7 @@ After the reboot the screen shows the **pairing screen** with a countdown — th
 
 ## Pair from Home Assistant
 
-1. **Install the integration** (one-time per HA): download `thread_panel.zip` from the [latest release](https://github.com/chaddugas/thread_control_panel/releases/latest), unzip it into your HA config's `custom_components/` (so `custom_components/thread_panel/` exists), and restart Home Assistant.
+1. **Install the integration** (a one-time drop-in per HA): download `thread_panel.zip` from the [latest release](https://github.com/chaddugas/thread_control_panel/releases/latest), unzip it into your HA config's `custom_components/` (so `custom_components/thread_panel/` exists), and restart Home Assistant. That's the only manual install it ever needs — from then on the integration updates itself through its own update entity.
 2. The panel appears under **Settings → Devices & Services** as a discovered **Thread Panel**. Open it.
 3. **Pick the entities** the panel should see — its interface receives exactly these, nothing else.
 4. **Fill the panel's hardware page**: an optional display name, the display rotation, and — only if you wired sensors — the pasted sensor config (next section).
@@ -70,6 +70,7 @@ Pins and units are your wiring; the `default_*` fields are starting points you c
 
 ## After setup
 
-- **Updates** arrive through the panel's update entity in HA — install from the device page when offered ([auto-update](auto-update.md) covers keeping your own UI current too).
+- **Updates** arrive through update entities in HA: each panel has one, and the **Thread Panel self-update** entry (it appears on its own) keeps the integration itself current. When a release changes the panel↔HA connection contract, the integration refuses to update ahead of your panels and tells you which to update first — panels first, integration last is the safe order, and it's enforced. ([auto-update](auto-update.md) covers keeping your own UI current too.)
+- **Instant update notices** (optional): the self-update entry's **Configure** dialog shows a webhook URL and secret. Add them as a webhook on this repo (Settings → Webhooks: content type `application/json`, release events only) and new releases appear in HA within seconds instead of on the hourly check. With Nabu Casa the URL works as-is; otherwise your HA must be reachable from the internet.
 - **The interface** is yours to build and publish: [Build your own UI](build-your-own-ui.md).
 - **On-panel tools** for a look under the hood live in the [CLI reference](cli.md).
