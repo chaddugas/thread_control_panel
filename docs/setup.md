@@ -70,7 +70,7 @@ Pins and units are your wiring; the `default_*` fields are starting points you c
 
 ## After setup
 
-- **Updates** arrive through update entities in HA: each panel has one, and the **Thread Panel self-update** entry (it appears on its own) keeps the integration itself current. When a release changes the panel↔HA connection contract, the integration refuses to update ahead of your panels and tells you which to update first — panels first, integration last is the safe order, and it's enforced. ([auto-update](auto-update.md) covers keeping your own UI current too.)
+- **Updates** arrive through update entities in HA: each panel has one, and the **Thread Panel self-update** entry (it appears on its own) keeps the integration itself current. When a release changes the panel↔HA connection contract, the integration's update stays out of sight until every panel is on it — update the panels as they offer, and the integration's update appears the moment the last one finishes. Panels first, integration last is the safe order, and it happens on its own. ([auto-update](auto-update.md) covers keeping your own UI current too.)
 - **Instant update notices** (optional): the self-update entry's **Configure** dialog shows a webhook URL and secret. Add them as a webhook on this repo (Settings → Webhooks: content type `application/json`, release events only) and new releases appear in HA within seconds instead of on the hourly check. With Nabu Casa the URL works as-is; otherwise your HA must be reachable from the internet.
 - **The interface** is yours to build and publish: [Build your own UI](build-your-own-ui.md).
 - **On-panel tools** for a look under the hood live in the [CLI reference](cli.md).
