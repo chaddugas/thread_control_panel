@@ -17,7 +17,7 @@ panel-logs --json                          # one JSON object per line
 
 Run `panel-logs --help` for the full list of scopes and more examples. A few worth knowing:
 
-- `--scope` takes one or more names (combined with OR). Common ones: `bridge`, `c6` (firmware), `ui`, `ota`, `wifi`, `net`, `ws`, `thread`.
+- `--scope` takes one or more names (combined with OR). Common ones: `bridge`, `uplink` (firmware), `ui`, `ota`, `wifi`, `net`, `ws`, `thread`.
 - `--level debug` is the deep view of a **software update** — it surfaces every step's command output. Day-to-day logging stops at `info`.
 - `--since` accepts ordinary expressions (`"3 hours ago"`, `"2026-06-18 12:00"`) plus shortcuts: `last-update`, `last-ota-fail`, `last-boot`.
 - Times shown as `~HH:MM:SS` are back-computed: the panel's clock hadn't synced yet when those lines were written (it learns the time from Home Assistant), so `panel-logs` derives their true wall time from the journal's internal clocks.
@@ -28,11 +28,11 @@ Three readouts of what's installed, each from a different source:
 
 ```
 panel-version       # the panel version Home Assistant shows, e.g. 4.2.3
-panel-pi-version    # the Raspberry-Pi-side build tag
-panel-c6-version    # the Thread chip's firmware tag (read from the chip itself)
+panel-helm-version  # the panel-computer side's build tag
+panel-uplink-version  # the Thread chip's firmware tag (read from the chip itself)
 ```
 
-`panel-version` and `panel-pi-version` read the installed release; `panel-c6-version` reads the chip directly, which is the honest answer if a firmware flash was interrupted.
+`panel-version` and `panel-helm-version` read the installed release; `panel-uplink-version` reads the chip directly, which is the honest answer if a firmware flash was interrupted.
 
 ## Re-running an install — `panel-install`
 
