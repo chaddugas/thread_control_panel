@@ -295,11 +295,13 @@ Panel-field write (e.g. `wifi_enabled`), dispatched to a bridge control.
 
 The store's WebSocket to the bridge is open.
 
-##### c6HeartbeatAt
+##### ~~c6HeartbeatAt~~
 
 > **c6HeartbeatAt**: `number` \| `null`
 
-Arrival stamp of the most recent C6 heartbeat; null until first seen.
+###### Deprecated
+
+Use [ConnectionState.uplinkHeartbeatAt](#uplinkheartbeatat).
 
 ##### ha
 
@@ -312,6 +314,12 @@ HA availability as seen through the panel; null until first seen.
 > **lastError**: `string` \| `null`
 
 Last WebSocket-level error, cleared on successful (re)connect.
+
+##### uplinkHeartbeatAt
+
+> **uplinkHeartbeatAt**: `number` \| `null`
+
+Arrival stamp of the most recent Uplink heartbeat; null until first seen.
 
 ***
 
@@ -333,11 +341,13 @@ Last WebSocket-level error, cleared on successful (re)connect.
 
 #### Properties
 
-##### c6Version
+##### ~~c6Version~~
 
 > **c6Version**: `string` \| `null`
 
-Running C6 firmware version, verbatim (carries the `v` prefix).
+###### Deprecated
+
+Use [PanelInfoState.uplinkVersion](#uplinkversion).
 
 ##### lanHost
 
@@ -357,6 +367,12 @@ fall back to "Thread Panel". Cosmetic only — never an identity.
 > **serial**: `string` \| `null`
 
 Board serial — the panel's only identity; null until seen.
+
+##### uplinkVersion
+
+> **uplinkVersion**: `string` \| `null`
+
+Running Uplink firmware version, verbatim (carries the `v` prefix).
 
 ***
 
@@ -400,11 +416,13 @@ Arrival stamp (epoch ms).
 
 ***
 
-### $c6LinkFresh
+### ~~$c6LinkFresh~~
 
 > `const` **$c6LinkFresh**: [`PanelStore`](#panelstore)\<`boolean`\>
 
-A C6 heartbeat arrived within the last 30 s. Subscribe, don't poll.
+#### Deprecated
+
+Use [$uplinkLinkFresh](#uplinklinkfresh).
 
 ***
 
@@ -473,6 +491,14 @@ Latest reading per declared sensor — names are open-ended by design.
 > `const` **$tunes**: [`PanelStore`](#panelstore)\<`Record`\<`string`, `number`\>\>
 
 HA-owned runtime tunables; absent names mean "not pushed yet".
+
+***
+
+### $uplinkLinkFresh
+
+> `const` **$uplinkLinkFresh**: [`PanelStore`](#panelstore)\<`boolean`\>
+
+An Uplink heartbeat arrived within the last 30 s. Subscribe, don't poll.
 
 ## Wire shapes
 

@@ -131,7 +131,9 @@ export interface ConnectionState {
   bridge: boolean;
   /** HA availability as seen through the panel; null until first seen. */
   ha: 'online' | 'offline' | null;
-  /** Arrival stamp of the most recent C6 heartbeat; null until first seen. */
+  /** Arrival stamp of the most recent Uplink heartbeat; null until first seen. */
+  uplinkHeartbeatAt: number | null;
+  /** @deprecated Use {@link ConnectionState.uplinkHeartbeatAt}. */
   c6HeartbeatAt: number | null;
   /** Last WebSocket-level error, cleared on successful (re)connect. */
   lastError: string | null;
@@ -207,7 +209,9 @@ export interface PanelInfoState {
   /** Optional HA-side label (raw, no serial tail); null when unset → consumers
    * fall back to "Thread Panel". Cosmetic only — never an identity. */
   name: string | null;
-  /** Running C6 firmware version, verbatim (carries the `v` prefix). */
+  /** Running Uplink firmware version, verbatim (carries the `v` prefix). */
+  uplinkVersion: string | null;
+  /** @deprecated Use {@link PanelInfoState.uplinkVersion}. */
   c6Version: string | null;
   /** The panel's mDNS name (`<hostname>.local`); null until seen. */
   lanHost: string | null;
@@ -223,8 +227,14 @@ export const $panelInfo: PanelStore<PanelInfoState>;
 export const $now: PanelStore<number>;
 
 /**
- * A C6 heartbeat arrived within the last 30 s. Subscribe, don't poll.
+ * An Uplink heartbeat arrived within the last 30 s. Subscribe, don't poll.
  *
+ * @group State families
+ */
+export const $uplinkLinkFresh: PanelStore<boolean>;
+
+/**
+ * @deprecated Use {@link $uplinkLinkFresh}.
  * @group State families
  */
 export const $c6LinkFresh: PanelStore<boolean>;
