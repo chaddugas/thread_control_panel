@@ -260,6 +260,8 @@ export interface UiQuarantineError {
   message: string;
 }
 /** @internal */
+export type UiMountOutcome = 'mounted' | 'refused' | 'failed';
+/** @internal */
 export interface UiStatusState {
   /** null until the bridge's first ui_status arrives (unknown ≠ absent). */
   installed: boolean | null;
@@ -274,9 +276,27 @@ export interface UiStatusState {
   since: number | null;
   /** Recent ui_log lines, frozen at quarantine time. */
   errors: UiQuarantineError[];
+  /** The installed bundle's declared store target; null = undeclared. */
+  storeDeclared: string | null;
+  /** Store surfaces the panel serves; null = unknown. */
+  storesServed: string[] | null;
+  /** The bundle verdict for the current stamp; null = no attempt reported. */
+  mountOutcome: UiMountOutcome | null;
+  mountReason: string | null;
 }
 /** @internal */
 export const $uiStatus: PanelStore<UiStatusState>;
+/**
+ * Report the shell's bundle verdict (mirrored into `$uiStatus`, sent to the
+ * bridge) — platform shell only.
+ *
+ * @internal
+ */
+export function reportUiMount(
+  outcome: UiMountOutcome,
+  reason?: string,
+  stamp?: string | null,
+): boolean;
 
 // ---- outbound wire shapes (for the raw `send` escape hatch) ----
 
@@ -313,10 +333,22 @@ export interface UiLogCommand {
 export interface UiHeartbeatCommand {
   type: 'ui_heartbeat';
 }
+/**
+ * The shell's bundle verdict — consumed bridge-side, platform shell only.
+ *
+ * @internal
+ */
+export interface UiMountStatusCommand {
+  type: 'ui_mount_status';
+  outcome: UiMountOutcome;
+  reason?: string;
+  stamp?: string | null;
+}
 /** @group Wire shapes */
 export type OutgoingCommand =
   | CallServiceCommand
   | PanelSetCommand
   | PanelCmdCommand
   | UiLogCommand
-  | UiHeartbeatCommand;
+  | UiHeartbeatCommand
+  | UiMountStatusCommand;

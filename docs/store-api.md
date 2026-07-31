@@ -554,4 +554,4 @@ An Uplink heartbeat arrived within the last 30 s. Subscribe, don't poll.
 
 ### OutgoingCommand
 
-> **OutgoingCommand** = [`CallServiceCommand`](#callservicecommand) \| [`PanelSetCommand`](#panelsetcommand) \| [`PanelCmdCommand`](#panelcmdcommand) \| [`UiLogCommand`](#uilogcommand) \| `UiHeartbeatCommand`
+> **OutgoingCommand** = [`CallServiceCommand`](#callservicecommand) \| [`PanelSetCommand`](#panelsetcommand) \| [`PanelCmdCommand`](#panelcmdcommand) \| [`UiLogCommand`](#uilogcommand) \| `UiHeartbeatCommand` \| `UiMountStatusCommand`

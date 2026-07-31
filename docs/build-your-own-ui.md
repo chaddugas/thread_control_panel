@@ -5,6 +5,7 @@ A panel's product UI is a **bundle of assets the panel downloads and mounts** �
 The shape of it:
 
 - Your build emits **`panel-ui.js`** (an ES module exporting `mount(el)`) and optionally **`panel-ui.css`** + an `assets/` directory, tarred at the **root** of a `.tar.gz`.
+- Ship a **`panel-ui.json`** beside them declaring the store surface you program against — `{"store": "v1"}`. It's optional, but it's what lets a panel refuse your bundle with a precise on-screen reason if it ever meets a platform that doesn't serve that surface, instead of mounting it into a runtime error.
 - You publish that tarball as a GitHub release asset and point the panel at `owner/repo` from Home Assistant (Configure → Panel UI source). The panel downloads, validates, installs, and hot-reloads into it — no reboot.
 - On the panel there is no internet: the document's CSP allows same-origin + the panel's own websocket, nothing else. Fonts and images ship in your bundle; data arrives through the store.
 - Don't self-mount, don't `connect()` in production, don't style `html`/`body` — the shell owns the document and the store connection. And if your app wedges the panel's main thread, the platform restarts the browser twice and then quarantines your bundle behind a failure screen until you ship a fixed one.
