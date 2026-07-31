@@ -133,8 +133,6 @@ export interface ConnectionState {
   ha: 'online' | 'offline' | null;
   /** Arrival stamp of the most recent Uplink heartbeat; null until first seen. */
   uplinkHeartbeatAt: number | null;
-  /** @deprecated Use {@link ConnectionState.uplinkHeartbeatAt}. */
-  c6HeartbeatAt: number | null;
   /** Last WebSocket-level error, cleared on successful (re)connect. */
   lastError: string | null;
 }
@@ -211,8 +209,6 @@ export interface PanelInfoState {
   name: string | null;
   /** Running Uplink firmware version, verbatim (carries the `v` prefix). */
   uplinkVersion: string | null;
-  /** @deprecated Use {@link PanelInfoState.uplinkVersion}. */
-  c6Version: string | null;
   /** The panel's mDNS name (`<hostname>.local`); null until seen. */
   lanHost: string | null;
 }
@@ -232,12 +228,6 @@ export const $now: PanelStore<number>;
  * @group State families
  */
 export const $uplinkLinkFresh: PanelStore<boolean>;
-
-/**
- * @deprecated Use {@link $uplinkLinkFresh}.
- * @group State families
- */
-export const $c6LinkFresh: PanelStore<boolean>;
 
 // ---- platform-internal families ----
 // Shipped for the platform shell (pairing + OTA screens). NOT part of the

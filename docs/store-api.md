@@ -295,14 +295,6 @@ Panel-field write (e.g. `wifi_enabled`), dispatched to a bridge control.
 
 The store's WebSocket to the bridge is open.
 
-##### ~~c6HeartbeatAt~~
-
-> **c6HeartbeatAt**: `number` \| `null`
-
-###### Deprecated
-
-Use [ConnectionState.uplinkHeartbeatAt](#uplinkheartbeatat).
-
 ##### ha
 
 > **ha**: `"online"` \| `"offline"` \| `null`
@@ -340,14 +332,6 @@ Arrival stamp of the most recent Uplink heartbeat; null until first seen.
 ### PanelInfoState
 
 #### Properties
-
-##### ~~c6Version~~
-
-> **c6Version**: `string` \| `null`
-
-###### Deprecated
-
-Use [PanelInfoState.uplinkVersion](#uplinkversion).
 
 ##### lanHost
 
@@ -413,16 +397,6 @@ Arrival stamp (epoch ms).
 ##### value
 
 > **value**: `number`
-
-***
-
-### ~~$c6LinkFresh~~
-
-> `const` **$c6LinkFresh**: [`PanelStore`](#panelstore)\<`boolean`\>
-
-#### Deprecated
-
-Use [$uplinkLinkFresh](#uplinklinkfresh).
 
 ***
 
