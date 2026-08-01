@@ -34,6 +34,28 @@ panel-uplink-version  # the Thread chip's firmware tag (read from the chip itsel
 
 `panel-version` and `panel-helm-version` read the installed release; `panel-uplink-version` reads the chip directly, which is the honest answer if a firmware flash was interrupted.
 
+## Health check — `panel-doctor`
+
+One command that walks the panel's whole delivery chain and prints a verdict per hop — services, the Thread chip's link, pairing state, the connection to Home Assistant, and whether the panel's UI actually mounted:
+
+```
+panel-doctor
+```
+
+```
+  bridge service  OK      active
+  UI server       OK      active
+  kiosk (cog)     OK      active
+  bridge WS       OK      connected, snapshot read
+  Uplink link     OK      heartbeat live
+  provisioned     OK      device key sealed
+  Thread / OMR    OK      implied by the live HA link
+  HA link         OK      online
+  UI bundle       FAIL    refused — bundle declares store v2; panel serves v1
+```
+
+It only reads signals the panel already produces (no test traffic), so it's safe to run any time. `UNKNOWN` means the panel has no local way to observe that hop — usually because an earlier hop is down. Exits non-zero when any hop fails, so it works in scripts. Reaches your `PATH` with the next `panel-install` run; until then it lives at `/opt/panel/current/bridge/.venv/bin/panel-doctor`.
+
 ## Re-running an install — `panel-install`
 
 Re-fetch and run a release's installer on an already-set-up panel — the same thing the first-time `curl … | bash` install does — without pasting the install command again.
