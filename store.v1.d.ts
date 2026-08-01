@@ -117,7 +117,7 @@ export function callService(
 export function setPanel(name: string, value: unknown): boolean;
 
 /**
- * Panel command (e.g. `reboot_pi`). Structured args ride under `value`.
+ * Panel command (e.g. `reboot_helm`). Structured args ride under `value`.
  *
  * @group Commands
  */

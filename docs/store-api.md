@@ -245,7 +245,7 @@ entity_ids; the bridge drops calls while HA is offline — gate on
 
 > **panelCommand**(`name`, `value?`): `boolean`
 
-Panel command (e.g. `reboot_pi`). Structured args ride under `value`.
+Panel command (e.g. `reboot_helm`). Structured args ride under `value`.
 
 #### Parameters
 

@@ -25,10 +25,10 @@ For a **DSI panel**, you can pre-answer the display question before first boot: 
 ## Install
 
 ```bash
-curl -sSL https://github.com/chaddugas/thread_control_panel/releases/latest/download/install-pi.sh | bash
+curl -sSL https://github.com/chaddugas/thread_control_panel/releases/latest/download/panel-bootstrap.sh | bash
 ```
 
-The installer handles the whole panel side: it downloads the release, flashes the radio chip over the USB cable, installs the kiosk and bridge services, and reboots into the panel software. On a DSI panel with no pre-seeded answer it shows a picker of the display overlays Pi OS ships — choose your panel's model. You can also pass it directly: `install-pi.sh --display=<overlay>`.
+The installer handles the whole panel side: it downloads the release, flashes the radio chip over the USB cable, installs the kiosk and bridge services, and reboots into the panel software. On a DSI panel with no pre-seeded answer it shows a picker of the display overlays Pi OS ships — choose your panel's model. You can also pass it directly: `panel-bootstrap.sh --display=<overlay>`.
 
 Re-running the same command later is safe: it detects what's already current and skips it. `--factory` is the full wipe-and-reinstall.
 

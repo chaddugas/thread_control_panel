@@ -9,7 +9,7 @@ This repository carries **releases and documentation only** — install scripts,
 Flash Raspberry Pi OS Lite (set your WiFi and SSH credentials in the imager), let the Pi boot and join your network, then ssh in and run:
 
 ```bash
-curl -sSL https://github.com/chaddugas/thread_control_panel/releases/latest/download/install-pi.sh | bash
+curl -sSL https://github.com/chaddugas/thread_control_panel/releases/latest/download/panel-bootstrap.sh | bash
 ```
 
 Then pair from Home Assistant: the panel shows up under **Settings → Devices & Services** as a discovered Thread Panel — pick the entities it should see, paste its hardware config, confirm the 6-digit code on the panel's screen, done. Certificates and keys are minted automatically. The full walkthrough — hardware assembly, DSI screens, sensors — is [Set up a panel](docs/setup.md).
